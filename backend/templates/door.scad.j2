@@ -1,0 +1,14 @@
+// door.scad.j2
+// OpenBIM Studio — Component: Door (M08 OpenSCAD Engine)
+// Params (mm): width, height, thickness
+// TODO(Phase 2): frame, swing direction, hardware
+
+width = {{ width }};
+height = {{ height }};
+thickness = {{ thickness }};
+
+module door(width, height, thickness) {
+    cube([width, thickness, height]);
+}
+
+door(width, height, thickness);

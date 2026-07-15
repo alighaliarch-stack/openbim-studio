@@ -1,0 +1,14 @@
+// wall.scad.j2
+// OpenBIM Studio — Component: Wall (M08 OpenSCAD Engine)
+// Params (mm): length, height, thickness
+// TODO(Phase 2): openings (doors/windows), material-based coloring
+
+length = {{ length }};
+height = {{ height }};
+thickness = {{ thickness }};
+
+module wall(length, height, thickness) {
+    cube([length, thickness, height]);
+}
+
+wall(length, height, thickness);

@@ -1,0 +1,13 @@
+# OpenBIM Studio MVP — backend dependencies
+# Matches SDS Section 8.3 Technology Stack
+
+fastapi>=0.104
+uvicorn[standard]>=0.24
+pydantic>=2.5
+jinja2>=3.1
+trimesh>=4.0
+ifcopenshell>=0.7.0  # TODO(Phase 2): wire into M11 IFC Export (out of MVP scope)
+langchain>=0.1        # TODO: wire real provider call in services/llm/llm_client.py
+anthropic>=0.25        # Claude API client (primary LLM provider)
+openai>=1.10           # Alternate LLM provider
+python-dotenv>=1.0

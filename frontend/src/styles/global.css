@@ -1,0 +1,125 @@
+/**
+ * styles/global.css
+ *
+ * Minimal MVP styling. Per MVP_Summary_and_Overview.md "Common Pitfalls":
+ * "Overcomplicating UI -> Use simple HTML divs, no fancy CSS. Function
+ * before form." Polish is a Phase 2 concern.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font-family: system-ui, sans-serif;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-shell__body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  min-height: 0;
+}
+
+.app-shell__left-panel,
+.app-shell__right-panel {
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+.app-shell__viewport {
+  position: relative;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+}
+
+.viewport,
+.viewport__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.model-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.model-tree__row--selected {
+  background: #ffe6cc;
+}
+
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.input-field {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.ai-chat-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 200px;
+  border-top: 1px solid #ddd;
+}
+
+.ai-chat-panel__messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.chat-message {
+  padding: 4px 8px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  max-width: 90%;
+}
+
+.chat-message--user {
+  background: #e6f1fb;
+  margin-left: auto;
+}
+
+.chat-message--assistant {
+  background: #f0f0f0;
+}
+
+.ai-chat-panel__composer {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-chat-panel__composer input {
+  flex: 1;
+}

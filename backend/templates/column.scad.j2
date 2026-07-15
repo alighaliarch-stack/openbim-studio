@@ -1,0 +1,13 @@
+// column.scad.j2
+// OpenBIM Studio — Component: Column (M08 OpenSCAD Engine)
+// Params (mm): diameter, height
+// TODO(Phase 2): non-circular profiles, base plates
+
+diameter = {{ diameter }};
+height = {{ height }};
+
+module column(diameter, height) {
+    cylinder(h = height, d = diameter, $fn = 32);
+}
+
+column(diameter, height);

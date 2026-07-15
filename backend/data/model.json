@@ -1,0 +1,83 @@
+{
+  "project": {
+    "guid": "proj-001",
+    "name": "Demo Building",
+    "description": ""
+  },
+  "entities": [
+    {
+      "guid": "building-001",
+      "type": "IfcBuilding",
+      "name": "Main Building",
+      "parent_guid": null,
+      "children_guids": [
+        "storey-001"
+      ],
+      "psets": {
+        "Pset_BuildingCommon": {
+          "BuildingName": "Main",
+          "IsSoundProof": false
+        }
+      },
+      "geometry": null,
+      "materials": [],
+      "layer": "Architecture"
+    },
+    {
+      "guid": "storey-001",
+      "type": "IfcBuildingStorey",
+      "name": "Ground Floor",
+      "parent_guid": "building-001",
+      "children_guids": [
+        "wall-001"
+      ],
+      "psets": {
+        "Pset_BuildingStoreyCommon": {
+          "Elevation": 0
+        }
+      },
+      "geometry": null,
+      "materials": [],
+      "layer": "Architecture"
+    },
+    {
+      "guid": "wall-001",
+      "type": "IfcWall",
+      "name": "North Wall",
+      "parent_guid": "storey-001",
+      "children_guids": [],
+      "psets": {
+        "Pset_WallCommon": {
+          "IsExternal": false,
+          "FireRating": "FD30",
+          "SoundTransmission": 45
+        },
+        "Qto_WallBaseQuantities": {
+          "Length": 6000,
+          "Height": 4500,
+          "Thickness": 5000
+        }
+      },
+      "geometry": {
+        "type": "stl",
+        "url": "/geometry/wall-001.stl",
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            6000,
+            5000,
+            4500
+          ]
+        }
+      },
+      "materials": [
+        "Concrete"
+      ],
+      "layer": "Architecture"
+    }
+  ]
+}
