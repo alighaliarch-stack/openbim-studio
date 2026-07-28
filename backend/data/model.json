@@ -16,7 +16,7 @@
       "psets": {
         "Pset_BuildingCommon": {
           "BuildingName": "Main",
-          "IsSoundProof": false
+          "IsSoundProof": true
         }
       },
       "geometry": null,
@@ -33,7 +33,7 @@
       ],
       "psets": {
         "Pset_BuildingStoreyCommon": {
-          "Elevation": 0
+          "Elevation": 1000
         }
       },
       "geometry": null,
@@ -48,14 +48,14 @@
       "children_guids": [],
       "psets": {
         "Pset_WallCommon": {
-          "IsExternal": false,
+          "IsExternal": true,
           "FireRating": "FD30",
-          "SoundTransmission": 45
+          "SoundTransmission": 50
         },
         "Qto_WallBaseQuantities": {
-          "Length": 6000,
-          "Height": 4500,
-          "Thickness": 5000
+          "Length": 200,
+          "Height": 1000,
+          "Thickness": 200
         }
       },
       "geometry": {
@@ -68,9 +68,9 @@
             0
           ],
           "max": [
-            6000,
-            5000,
-            4500
+            200,
+            200,
+            1000
           ]
         }
       },

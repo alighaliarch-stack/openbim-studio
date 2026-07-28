@@ -3,13 +3,24 @@
  *
  * M05 Property Manager (SDS Section 3, M05).
  *
- * Reads the current selection (M04) and displays/edits the primary
- * entity's property sets, dispatching edits to M10 via useModel()'s
- * editProperty (POST /api/properties/{guid}).
+ * Reads the current selection (M04 via useSelection) and displays all
+ * editable properties for the primary selected entity. Editing a
+ * property calls POST /api/properties/{guid} via useModel, then applies
+ * the backend-confirmed entity so the viewport and Model Tree both
+ * reflect the authoritative state (driven by ModelContext.lastModified,
+ * which Viewport and ModelTree already subscribe to).
  *
- * Per SRS Use Case 4 (Multi-Select and Batch Inspect): when multiple
- * entities are selected, shows a summary rather than an editable grid.
+ * Per-field saving and success indicators are passed down to InputField
+ * so the user gets immediate feedback without the whole panel going stale.
+ *
+ * Changes from stub version:
+ *   1. Passes savingField / successField / fieldKey down to PropertyGrid
+ *      so InputField can show per-row "…" / "✓" without disabling the grid.
+ *   2. Clears saveError automatically when the user starts a new edit.
+ *   3. Multi-select branch kept — no editing (deferred to Phase 2).
  */
+
+import { useCallback } from "react";
 
 import { PropertyGrid } from "@/components/properties/PropertyGrid";
 import { useModel } from "@/hooks/useModel";
@@ -17,41 +28,98 @@ import { useSelection } from "@/hooks/useSelection";
 
 export function PropertyPanel() {
   const { primaryEntity, isMultiSelect, selectedEntities } = useSelection();
-  const { editProperty, isSaving, saveError } = useModel();
+  const { editProperty, isSaving, savingField, successField, saveError } = useModel();
+
+  // Stable wrapper so PropertyGrid/InputField don't get new refs on every render.
+  const handleEdit = useCallback(
+    (pset: string, prop: string, value: unknown) => {
+      if (!primaryEntity) return;
+      void editProperty(primaryEntity.guid, pset, prop, value);
+    },
+    [editProperty, primaryEntity]
+  );
+
+  // ── Empty / multi-select states ───────────────────────────────────────────
 
   if (selectedEntities.length === 0) {
-    return <div className="property-panel property-panel--empty">No entity selected.</div>;
+    return (
+      <div className="property-panel property-panel--empty">
+        <p>No entity selected.</p>
+        <p className="property-panel__hint">Click an entity in the viewport or model tree.</p>
+      </div>
+    );
   }
 
   if (isMultiSelect) {
     return (
       <div className="property-panel property-panel--multi">
-        <p>Multiple entities selected ({selectedEntities.length})</p>
-        {/* FR: "Property panel shows common properties only (or disabled
-            edit for now)". TODO(Phase 2): compute and edit shared PSets
-            across the whole selection. */}
+        <p>{selectedEntities.length} entities selected.</p>
+        <p className="property-panel__hint">
+          Select a single entity to edit its properties.
+        </p>
+        {/* TODO(Phase 2): compute and batch-edit shared PSets. */}
       </div>
     );
   }
 
   if (!primaryEntity) {
-    return <div className="property-panel property-panel--empty">No entity selected.</div>;
+    return (
+      <div className="property-panel property-panel--empty">
+        <p>No entity selected.</p>
+      </div>
+    );
   }
+
+  // ── Single-entity view ────────────────────────────────────────────────────
 
   return (
     <div className="property-panel">
+
+      {/* Entity header */}
       <header className="property-panel__header">
-        <h2>{primaryEntity.name}</h2>
+        <h2 className="property-panel__name" title={primaryEntity.guid}>
+          {primaryEntity.name}
+        </h2>
         <span className="property-panel__type">{primaryEntity.type}</span>
+        <span className="property-panel__guid" title="IFC GUID">
+          {primaryEntity.guid.slice(0, 8)}…
+        </span>
       </header>
 
+      {/* Layer + material summary */}
+      {(primaryEntity.layer || primaryEntity.materials.length > 0) && (
+        <div className="property-panel__meta">
+          {primaryEntity.layer && (
+            <span className="property-panel__layer">{primaryEntity.layer}</span>
+          )}
+          {primaryEntity.materials.map((m) => (
+            <span key={m} className="property-panel__material">{m}</span>
+          ))}
+        </div>
+      )}
+
+      {/* Save error banner */}
+      {saveError && (
+        <div className="property-panel__error" role="alert">
+          <strong>Save failed:</strong> {saveError}
+        </div>
+      )}
+
+      {/* Property grid — per-field saving/success passed down */}
       <PropertyGrid
         entity={primaryEntity}
-        disabled={isSaving}
-        onEdit={(pset, prop, value) => void editProperty(primaryEntity.guid, pset, prop, value)}
+        disabled={false}          // grid stays enabled; per-field spinner handles in-flight
+        savingField={savingField}
+        successField={successField}
+        onEdit={handleEdit}
       />
 
-      {saveError && <p className="property-panel__error">Failed to save: {saveError}</p>}
+      {/* Global saving indicator (fallback for screen readers / no-JS) */}
+      {isSaving && (
+        <div className="property-panel__saving" aria-live="polite">
+          Saving…
+        </div>
+      )}
     </div>
   );
 }

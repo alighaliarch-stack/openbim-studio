@@ -9,10 +9,12 @@
  *   render(), loadMesh(guid, geometry), highlight(guid, mode),
  *   pick(ray), applyTransform(guid, matrix)
  *
- * MVP scope: orbit camera (via OrbitControls: left-drag orbit, middle-drag
- * pan, wheel zoom) + raycaster picking + placeholder box geometry
- * (bounding-box rendering, per MVP_Summary_and_Overview.md "Parsing real
- * STL files is too complex; use bounding box -> BoxGeometry").
+ * MVP scope: orbit camera (via OrbitControls: right-drag orbit, middle-drag
+ * pan, wheel zoom -- left mouse is deliberately left unbound from camera
+ * control so it's free for selection, see mount()) + raycaster picking +
+ * placeholder box geometry (bounding-box rendering, per
+ * MVP_Summary_and_Overview.md "Parsing real STL files is too complex; use
+ * bounding box -> BoxGeometry").
  *
  * TODO(Phase 2): Load real STL geometry via THREE.STLLoader instead of
  * bounding-box placeholders; add SelectionGizmo (three-transform-controls).
@@ -57,16 +59,20 @@ export class SceneManager {
   mount(canvas: HTMLCanvasElement): void {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 
-    // Orbit/pan/zoom camera controls:
-    //   left mouse   -> orbit (ROTATE)
+    // Camera mouse-button scheme (Revit/Blender-style, not free-look):
+    //   left mouse   -> intentionally left UNBOUND. OrbitControls never
+    //                   sees left-button drags, so it can't compete with
+    //                   click-to-select in Viewport.tsx, and a left-drag
+    //                   currently does nothing (reserved for a future
+    //                   selection-rectangle gesture).
+    //   right mouse  -> orbit (ROTATE), around controls.target
     //   middle mouse -> pan
-    //   wheel        -> zoom (DOLLY; handled internally by OrbitControls
-    //                   regardless of the mouseButtons mapping below)
+    //   wheel        -> zoom (DOLLY; handled internally by OrbitControls,
+    //                   independent of the mouseButtons mapping below)
     const controls = new OrbitControls(this.camera, canvas);
     controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.ROTATE,
     };
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
@@ -137,6 +143,47 @@ export class SceneManager {
     const intersections = this.raycaster.intersectObjects(meshes, false);
     if (intersections.length === 0) return null;
     return (intersections[0].object.userData.guid as string) ?? null;
+  }
+
+  /**
+   * Focus the camera on `guid`'s mesh: retarget OrbitControls so future
+   * orbiting happens around that object (not the world origin), and move
+   * the camera along its current viewing direction so the object is
+   * nicely framed, rather than jumping to an arbitrary angle.
+   *
+   * No-ops if `guid` has no loaded mesh or controls aren't mounted yet.
+   *
+   * Written as a small, self-contained "frame this bounding box" utility
+   * so it can be reused later for a multi-object Fit-to-View without
+   * changing its shape -- that's a separate, not-yet-approved feature,
+   * but this method's internals are intentionally already generic enough
+   * to support it.
+   */
+  focusOn(guid: string): void {
+    const entry = this.meshesByGuid.get(guid);
+    if (!entry || !this.controls) return;
+
+    const box = new THREE.Box3().setFromObject(entry.mesh);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const radius = sphere.radius || 1;
+
+    const previousTarget = this.controls.target.clone();
+    let direction = new THREE.Vector3().subVectors(this.camera.position, previousTarget);
+    if (direction.lengthSq() === 0) {
+      // Camera was exactly at the target (degenerate case) -- fall back
+      // to a fixed viewing angle rather than dividing by zero.
+      direction = new THREE.Vector3(1, -1, 0.75);
+    }
+    direction.normalize();
+
+    // Distance at which a sphere of this radius fills the vertical FOV,
+    // with 50% padding so the object isn't touching the viewport edges.
+    const verticalFovRadians = (this.camera.fov * Math.PI) / 180;
+    const fitDistance = (radius / Math.sin(verticalFovRadians / 2)) * 1.5;
+
+    this.camera.position.copy(sphere.center).addScaledVector(direction, fitDistance);
+    this.controls.target.copy(sphere.center);
+    this.controls.update();
   }
 
   /** Apply a highlight color to `guid`'s mesh (selection/hover feedback). */
