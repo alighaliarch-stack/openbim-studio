@@ -1,17 +1,23 @@
-"""
-services/openscad/engine.py
+"""services/openscad/engine.py
 
-M08 OpenSCAD Engine — top-level facade.
+M08 OpenSCAD Engine -- top-level facade.
 
-Orchestrates the full render pipeline described in SDS Flow 1:
+Orchestrates the full render pipeline:
     ComponentRegistry.get(component_type)
-    -> TemplateRenderer.render(template, params)
+    -> TemplateRenderer.merge_defaults(template, params)
+    -> TemplateRenderer.render(template, merged_params)
     -> CLIExecutor.render_to_stl(scad_source)
     -> StlParser.parse_bounds(stl_path)
     -> RenderResult
 
-This is the single object api/scad.py depends on; it composes the other
-M08 collaborators so callers don't need to wire them individually.
+Synchronous by design (Walking Skeleton / MVP stage), matching
+CLIExecutor -- see that module's docstring for the full trade-off
+analysis and the migration path back to async if a future concurrent
+server needs it. This class's public contract (constructor signature,
+`render(component_id, params) -> RenderResult`, and the exception
+handling below) is unchanged by that decision; only the calling
+convention (`def` instead of `async def`, no `await`) differs from the
+previous version.
 """
 
 from __future__ import annotations
@@ -40,18 +46,12 @@ class OpenSCADEngine:
         self._executor = executor
         self._parser = parser
 
-    async def render(self, component_id: str, params: ParameterMap) -> RenderResult:
-        """
-        Render `component_id` with `params` end-to-end.
+    def render(self, component_id: str, params: ParameterMap) -> RenderResult:
+        """Render `component_id` with `params` end-to-end.
 
         Never raises for expected failure modes (missing component,
         template error, CLI timeout, bad STL); those are captured in the
-        returned RenderResult.error so api/scad.py can return a clean
-        500-with-message per SDS 9.3 Error Response Format.
-
-        TODO: Wire M10 entity creation/geometry-update here once the AI
-        Chat Module (M09) needs a single call that both renders and
-        updates the entity graph (Flow 2, "CreateComponent" branch).
+        returned RenderResult.error.
         """
         start = time.perf_counter()
 
@@ -68,7 +68,7 @@ class OpenSCADEngine:
             return RenderResult(status=RenderStatus.FAILED, error=str(exc))
 
         try:
-            cli_result = await self._executor.render_to_stl(scad_source)
+            cli_result = self._executor.render_to_stl(scad_source)
         except OpenSCADTimeoutError as exc:
             return RenderResult(status=RenderStatus.FAILED, error=str(exc))
 

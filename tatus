@@ -1,0 +1,360 @@
+warning: in the working copy of 'backend/api/scad.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/services/ifc/entity_store.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/services/openscad/cli_executor.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/services/openscad/engine.py', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/backend/api/scad.py b/backend/api/scad.py[m
+[1mindex 272e6c8..cf8fe3d 100644[m
+[1m--- a/backend/api/scad.py[m
+[1m+++ b/backend/api/scad.py[m
+[36m@@ -33,7 +33,7 @@[m [masync def render_component([m
+     message per the SRS alternative flow, without special-casing HTTP[m
+     status codes for this endpoint.[m
+     """[m
+[31m-    result = await engine.render(body.component_type, body.parameters)[m
+[32m+[m[32m    result = engine.render(body.component_type, body.parameters)[m
+     return ScadRenderResponse([m
+         success=result.status == RenderStatus.SUCCESS,[m
+         stl_path=result.stl_path,[m
+[1mdiff --git a/backend/data/model.json b/backend/data/model.json[m
+[1mindex 36773b5..900eab4 100644[m
+[1m--- a/backend/data/model.json[m
+[1m+++ b/backend/data/model.json[m
+[36m@@ -53,9 +53,9 @@[m
+           "SoundTransmission": 50[m
+         },[m
+         "Qto_WallBaseQuantities": {[m
+[31m-          "Length": 200,[m
+[31m-          "Height": 1000,[m
+[31m-          "Thickness": 200[m
+[32m+[m[32m          "Length": 500,[m
+[32m+[m[32m          "Height": 500,[m
+[32m+[m[32m          "Thickness": 500[m
+         }[m
+       },[m
+       "geometry": {[m
+[36m@@ -68,9 +68,9 @@[m
+             0[m
+           ],[m
+           "max": [[m
+[31m-            200,[m
+[31m-            200,[m
+[31m-            1000[m
+[32m+[m[32m            500,[m
+[32m+[m[32m            500,[m
+[32m+[m[32m            500[m
+           ][m
+         }[m
+       },[m
+[1mdiff --git a/backend/services/ifc/entity_store.py b/backend/services/ifc/entity_store.py[m
+[1mindex 47b7647..7435ad8 100644[m
+[1m--- a/backend/services/ifc/entity_store.py[m
+[1m+++ b/backend/services/ifc/entity_store.py[m
+[36m@@ -1,52 +1,18 @@[m
+[31m-"""[m
+[31m-services/ifc/entity_store.py[m
+[31m-[m
+[31m-M10 IFC Semantic Layer — EntityStore.[m
+[31m-[m
+[31m-Owns the canonical in-memory entity graph (MODEL_STATE in SDS 10.2):[m
+[31m-[m
+[31m-    MODEL_STATE = {[m
+[31m-        "entities": { guid: IfcEntity, ... },[m
+[31m-        "tree": None  # built on demand via _build_tree()[m
+[31m-    }[m
+[31m-[m
+[31m-Public API mirrors SRS FR-070:[m
+[31m-    getEntity(guid), getTree(), getRelationships(guid),[m
+[31m-    setProp(), addEntity(), removeEntity(), subscribe(guid, callback)[m
+[31m-[m
+[31m-Guarantee (SDS 8.2): spatial tree is always valid; no orphaned nodes.[m
+[31m-"""[m
+[31m-[m
+ from __future__ import annotations[m
+[31m-[m
+ import logging[m
+ from collections.abc import Callable[m
+ from typing import Any[m
+[31m-[m
+ from core.persistence import ModelPersistence[m
+[31m-from services.ifc.models import IfcEntity, ModelDocument, SpatialNode[m
+ from services.geometry.parametric_geometry import ParametricGeometry[m
+[32m+[m[32mfrom services.ifc.models import IfcEntity, ModelDocument, SpatialNode[m
+ [m
+ logger = logging.getLogger(__name__)[m
+[31m-[m
+[31m-# Subscriber callback signature: (guid, change_type, payload) -> None[m
+ ChangeCallback = Callable[[str, str, dict[str, Any]], None][m
+ [m
+[31m-[m
+ class EntityNotFoundError(KeyError):[m
+[31m-    """Raised when an operation references a GUID not present in the store."""[m
+[31m-[m
+[32m+[m[32m    pass[m
+ [m
+ class EntityStore:[m
+[31m-    """[m
+[31m-    Single source of truth for all IFC entity data, relationships, property[m
+[31m-    sets, and spatial structure, for the lifetime of the backend process.[m
+[31m-[m
+[31m-    Not thread-safe by design (MVP is single-user, single-process); the[m
+[31m-    FastAPI app should treat this as a process-wide singleton (see[m
+[31m-    api/router.py / main.py dependency wiring).[m
+[31m-    """[m
+[31m-[m
+     def __init__(self, persistence: ModelPersistence) -> None:[m
+         self._persistence = persistence[m
+         self._entities: dict[str, IfcEntity] = {}[m
+[36m@@ -55,88 +21,51 @@[m [mclass EntityStore:[m
+         self._project_guid: str = ""[m
+         self._project_name: str = ""[m
+ [m
+[31m-    # ------------------------------------------------------------------[m
+[31m-    # Lifecycle[m
+[31m-    # ------------------------------------------------------------------[m
+[31m-[m
+     def load(self) -> None:[m
+[31m-        """[m
+[31m-        FR-071: Load model.json on startup, populate the entity store, and[m
+[31m-        build the spatial tree. Raises if the file is missing or corrupt.[m
+[31m-        """[m
+         raw = self._persistence.load()[m
+         document = ModelDocument.model_validate(raw)[m
+[31m-[m
+         self._project_guid = document.project.guid[m
+         self._project_name = document.project.name[m
+         self._entities = {e.guid: e for e in document.entities}[m
+[31m-        self._tree_cache = None  # force rebuild on next getTree()[m
+[31m-[m
+[31m-        logger.info([m
+[31m-            "Loaded model '%s': %d entities", self._project_name, len(self._entities)[m
+[31m-        )[m
+[32m+[m[32m        self._tree_cache = None[m
+ [m
+     def _persist(self) -> None:[m
+[31m-        """Write current in-memory state back to model.json (write path)."""[m
+         document = ModelDocument([m
+[31m-            project={[m
+[31m-                "guid": self._project_guid,[m
+[31m-                "name": self._project_name,[m
+[31m-                "description": "",[m
+[31m-            },[m
+[32m+[m[32m            project={"guid": self._project_guid, "name": self._project_name, "description": ""},[m
+             entities=list(self._entities.values()),[m
+         )[m
+         self._persistence.save(document.model_dump(mode="json"))[m
+ [m
+[31m-    # ------------------------------------------------------------------[m
+[31m-    # Reads[m
+[31m-    # ------------------------------------------------------------------[m
+[31m-[m
+     def get_entity(self, guid: str) -> IfcEntity:[m
+[31m-        """Return the entity for `guid` or raise EntityNotFoundError."""[m
+         try:[m
+             return self._entities[guid][m
+         except KeyError as exc:[m
+             raise EntityNotFoundError(guid) from exc[m
+ [m
+     def get_all_entities(self) -> list[IfcEntity]:[m
+[31m-        """Return all entities as a flat list (backs GET /api/model)."""[m
+         return list(self._entities.values())[m
+ [m
+     def get_tree(self) -> list[SpatialNode]:[m
+[31m-        """[m
+[31m-        FR-072: Return the spatial hierarchy, building it from the flat[m
+[31m-        entity map if not already cached.[m
+[31m-        """[m
+         if self._tree_cache is None:[m
+             self._tree_cache = self._build_tree()[m
+         return self._tree_cache[m
+ [m
+     def get_relationships(self, guid: str) -> dict[str, list[str]]:[m
+[31m-        """[m
+[31m-        Return the immediate relationships of `guid`: its parent (if any)[m
+[31m-        and its children, mirroring IFC aggregation/containment relations.[m
+[31m-[m
+[31m-        TODO(Phase 2): Model IfcRelAggregates / IfcRelContainedInSpatial[m
+[31m-        Structure explicitly instead of deriving purely from parent/child[m
+[31m-        GUID fields.[m
+[31m-        """[m
+         entity = self.get_entity(guid)[m
+[31m-        return {[m
+[31m-            "parent": [entity.parent_guid] if entity.parent_guid else [],[m
+[31m-            "children": list(entity.children_guids),[m
+[31m-        }[m
+[31m-[m
+[31m-    # ------------------------------------------------------------------[m
+[31m-    # Writes[m
+[31m-    # ------------------------------------------------------------------[m
+[32m+[m[32m        return {"parent": [entity.parent_guid] if entity.parent_guid else [], "children": list(entity.children_guids)}[m
+ [m
+     def set_prop(self, guid: str, pset: str, prop: str, value: Any) -> IfcEntity:[m
+         """[m
+         FR-073 / Flow 1 step "M10: Update entity in-memory".[m
+ [m
+[31m-        Updates a single property within a PSet, persists to disk, and[m
+[31m-        notifies subscribers with a "property_edited" change event.[m
+[32m+[m[32m        Updates a single property within a PSet, regenerates the[m
+[32m+[m[32m        entity's geometry to reflect the new value, persists to disk,[m
+[32m+[m[32m        and notifies subscribers with a "property_edited" change event.[m
+[32m+[m
+[32m+[m[32m        Execution order matters: geometry is regenerated before persist[m
+[32m+[m[32m        so the on-disk model.json never captures stale geometry from[m
+[32m+[m[32m        before this edit, and before notify so subscribers reacting to[m
+[32m+[m[32m        the event see the regenerated geometry, not the pre-edit value.[m
+         """[m
+         entity = self.get_entity(guid)[m
+         entity.psets.setdefault(pset, {})[prop] = value[m
+[36m@@ -146,80 +75,30 @@[m [mclass EntityStore:[m
+         return entity[m
+ [m
+     def add_entity(self, entity: IfcEntity) -> IfcEntity:[m
+[31m-        """[m
+[31m-        Add a new entity to the graph (e.g. from AI-driven CreateComponent[m
+[31m-        commands, Flow 2), wiring it into its parent's children_guids and[m
+[31m-        invalidating the tree cache so the hierarchy stays valid.[m
+[31m-        """[m
+         if entity.guid in self._entities:[m
+             raise ValueError(f"Entity with guid {entity.guid} already exists")[m
+[31m-[m
+         self._entities[entity.guid] = entity[m
+[31m-[m
+         if entity.parent_guid:[m
+             parent = self.get_entity(entity.parent_guid)[m
+             if entity.guid not in parent.children_guids:[m
+                 parent.children_guids.append(entity.guid)[m
+[31m-[m
+         self._tree_cache = None[m
+         self._persist()[m
+         self._notify(entity.guid, "entity_added", {"entity": entity.model_dump(mode="json")})[m
+         return entity[m
+ [m
+[31m-    def remove_entity(self, guid: str) -> None:[m
+[31m-        """[m
+[31m-        Remove an entity and detach it from its parent's children list.[m
+[31m-[m
+[31m-        TODO(Phase 2): Decide cascade behaviour for entities with children[m
+[31m-        (currently: children become orphaned parent_guid references, which[m
+[31m-        violates the "no orphaned nodes" guarantee -- must be fixed before[m
+[31m-        this is used outside of trivial demo flows).[m
+[31m-        """[m
+[31m-        entity = self.get_entity(guid)[m
+[31m-[m
+[31m-        if entity.parent_guid and entity.parent_guid in self._entities:[m
+[31m-            parent = self._entities[entity.parent_guid][m
+[31m-            if guid in parent.children_guids:[m
+[31m-                parent.children_guids.remove(guid)[m
+[31m-[m
+[31m-        del self._entities[guid][m
+[31m-        self._tree_cache = None[m
+[31m-        self._persist()[m
+[31m-        self._notify(guid, "entity_removed", {})[m
+[31m-[m
+[31m-    # ------------------------------------------------------------------[m
+[31m-    # Pub/sub[m
+[31m-    # ------------------------------------------------------------------[m
+[31m-[m
+     def subscribe(self, guid: str, callback: ChangeCallback) -> None:[m
+[31m-        """Register `callback` to be notified of changes to `guid`."""[m
+         self._subscribers.setdefault(guid, []).append(callback)[m
+ [m
+     def _notify(self, guid: str, change_type: str, payload: dict[str, Any]) -> None:[m
+         for callback in self._subscribers.get(guid, []):[m
+             callback(guid, change_type, payload)[m
+ [m
+[31m-    # ------------------------------------------------------------------[m
+[31m-    # Internal: spatial tree construction[m
+[31m-    # ------------------------------------------------------------------[m
+[31m-[m
+     def _build_tree(self) -> list[SpatialNode]:[m
+[31m-        """[m
+[31m-        FR-072: Construct the spatial hierarchy from the flat entity map.[m
+[31m-        Roots are entities with no parent_guid.[m
+[31m-        """[m
+[31m-[m
+         def build_node(entity: IfcEntity) -> SpatialNode:[m
+             return SpatialNode([m
+[31m-                guid=entity.guid,[m
+[31m-                name=entity.name,[m
+[31m-                type=entity.type,[m
+[31m-                children=[[m
+[31m-                    build_node(self._entities[child_guid])[m
+[31m-                    for child_guid in entity.children_guids[m
+[31m-                    if child_guid in self._entities[m
+[31m-                ],[m
+[32m+[m[32m                guid=entity.guid, name=entity.name, type=entity.type,[m
+[32m+[m[32m                children=[build_node(self._entities[c]) for c in entity.children_guids if c in self._entities],[m
+             )[m
+[31m-[m
+         roots = [e for e in self._entities.values() if not e.parent_guid][m
+[31m-        return [build_node(root) for root in roots][m
+[32m+[m[32m        return [build_node(r) for r in roots][m
+\ No newline at end of file[m
+[1mdiff --git a/backend/services/openscad/cli_executor.py b/backend/services/openscad/cli_executor.py[m
+[1mindex 68f2335..515832f 100644[m
+[1m--- a/backend/services/openscad/cli_executor.py[m
+[1m+++ b/backend/services/openscad/cli_executor.py[m
+[36m@@ -1,16 +1,31 @@[m
+[31m-"""[m
+[31m-services/openscad/cli_executor.py[m
+[31m-[m
+[31m-M08 OpenSCAD Engine — CLIExecutor (FR-051).[m
+[31m-[m
+[31m-Writes a rendered .scad source to a temp file and invokes the OpenSCAD CLI[m
+[31m-to produce an STL file, with a timeout to prevent hung processes.[m
+[32m+[m[32m"""services/openscad/cli_executor.py[m
+[32m+[m
+[32m+[m[32mM08 OpenSCAD Engine -- CLIExecutor (FR-051).[m
+[32m+[m
+[32m+[m[32mWrites a rendered .scad source to a temp file and invokes the OpenSCAD[m
+[32m+[m[32mCLI to produce an STL file, with a timeout to prevent hung processes.[m
+[32m+[m
+[32m+[m[32mSynchronous by design (Walking Skeleton / MVP stage): this subsystem has[m
+[32m+[m[32mno current consumer that runs inside an event loop, so a blocking[m
+[32m+[m[32msubprocess call has no concurrency cost to pay for today. See the[m
+[32m+[m[32marchitectural review preceding this change for the full trade-off[m
+[32m+[m[32manalysis.[m
+[32m+[m
+[32m+[m[32mMigration path back to async, if a future concurrent server needs it:[m
+[32m+[m[32mswap `subprocess.run(...)` below for `asyncio.create_subprocess_exec`[m
+[32m+[m[32m(+ `asyncio.wait_for` for the timeout, catching `asyncio.TimeoutError`[m
+[32m+[m[32minstead of `subprocess.TimeoutExpired`), and restore `async def` on[m
+[32m+[m[32m`render_to_stl`. The public contract -- `CLIResult`, the constructor[m
+[32m+[m[32msignature, and `OpenSCADTimeoutError` -- would not need to change; only[m
+[32m+[m[32mthe method's internals and its calling convention would. `OpenSCADEngine[m
+[32m+[m[32m.render()` would need the corresponding `async def`/`await` restored at[m
+[32m+[m[32mthat point too.[m
+ """[m
+ [m
+ from __future__ import annotations[m
+ [m
+[31m-import asyncio[m
+ import logging[m
+[32m+[m[32mimport subprocess[m
+ import uuid[m
+ from dataclasses import dataclass[m
+ from pathlib import Path[m
+[36m@@ -34,12 +49,12 @@[m [mclass OpenSCADTimeoutError(RuntimeError):[m
+ [m
+ [m
+ class CLIExecutor:[m
+[31m-    """[m
+[31m-    Thin async wrapper around the `openscad` CLI binary.[m
+[32m+[m[32m    """Thin synchronous wrapper around the `openscad` CLI binary.[m
+ [m
+[31m-    TODO(Phase 2): Pool / queue concurrent renders (RenderQueue in the[m
+[31m-    full architecture doc uses Celery); MVP runs renders serially per[m
+[31m-    request.[m
+[32m+[m[32m    TODO(Phase 2): Pool/queue concurrent renders if this is ever called[m
+[32m+[m[32m    from a context handling multiple simultaneous requests (unchanged[m
+[32m+[m[32m    from the original design note -- still applies once a real API[m
+[32m+[m[32m    layer exists).[m
+     """[m
+ [m
+     def __init__(self, openscad_binary: str, tmp_dir: Path, timeout_seconds: int = 30) -> None:[m
+[36m@@ -48,9 +63,8 @@[m [mclass CLIExecutor:[m
+         self._timeout_seconds = timeout_seconds[m
+         self._tmp_dir.mkdir(parents=True, exist_ok=True)[m
+ [m
+[31m-    async def render_to_stl(self, scad_source: str) -> CLIResult:[m
+[31m-        """[m
+[31m-        Write `scad_source` to

@@ -53,9 +53,9 @@
           "SoundTransmission": 50
         },
         "Qto_WallBaseQuantities": {
-          "Length": 200,
-          "Height": 1000,
-          "Thickness": 200
+          "Length": 500,
+          "Height": 500,
+          "Thickness": 500
         }
       },
       "geometry": {
@@ -68,9 +68,9 @@
             0
           ],
           "max": [
-            200,
-            200,
-            1000
+            500,
+            500,
+            500
           ]
         }
       },

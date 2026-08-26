@@ -33,7 +33,7 @@ async def render_component(
     message per the SRS alternative flow, without special-casing HTTP
     status codes for this endpoint.
     """
-    result = await engine.render(body.component_type, body.parameters)
+    result = engine.render(body.component_type, body.parameters)
     return ScadRenderResponse(
         success=result.status == RenderStatus.SUCCESS,
         stl_path=result.stl_path,
