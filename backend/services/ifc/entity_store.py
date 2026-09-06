@@ -3,7 +3,6 @@ import logging
 from collections.abc import Callable
 from typing import Any
 from core.persistence import ModelPersistence
-from services.geometry.parametric_geometry import ParametricGeometry
 from services.ifc.models import IfcEntity, ModelDocument, SpatialNode
 
 logger = logging.getLogger(__name__)
@@ -69,6 +68,7 @@ class EntityStore:
         """
         entity = self.get_entity(guid)
         entity.psets.setdefault(pset, {})[prop] = value
+        from services.geometry.parametric_geometry import ParametricGeometry
         ParametricGeometry.regenerate(entity)
         self._persist()
         self._notify(guid, "property_edited", {"pset": pset, "prop": prop, "value": value})

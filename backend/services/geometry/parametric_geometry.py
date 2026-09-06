@@ -1,15 +1,25 @@
 """
 services/geometry/parametric_geometry.py
 
-Temporary parametric geometry engine.
+Parametric geometry orchestration.
 
-Phase 1:
-Regenerates placeholder bounding boxes from editable IFC quantities.
+Delegates geometry regeneration to GeometryFactory, which dispatches by
+IFC type to the appropriate generator (currently WallGenerator for
+IfcWall). This restores the documented pipeline:
 
-Phase 2:
-This module will generate OpenSCAD instead.
+    EntityStore -> ParametricGeometry -> GeometryFactory -> WallGenerator
+
+Phase 1 (superseded): this module previously duplicated wall
+bounding-box arithmetic inline instead of delegating to GeometryFactory.
+That duplication has been removed -- GeometryFactory/WallGenerator are
+now the single source of truth for geometry computation.
+
+Phase 2: WallGenerator will be extended to call OpenSCADEngine instead
+of computing a bounding box directly. No change is required in this
+file when that happens, since this module only delegates.
 """
 
+from services.geometry.geometry_factory import GeometryFactory
 from services.ifc.models import IfcEntity
 
 
@@ -17,23 +27,4 @@ class ParametricGeometry:
 
     @staticmethod
     def regenerate(entity: IfcEntity) -> None:
-
-        if entity.type != "IfcWall":
-            return
-
-        quantities = entity.psets.get("Qto_WallBaseQuantities", {})
-
-        length = quantities.get("Length")
-        height = quantities.get("Height")
-        thickness = quantities.get("Thickness")
-
-        if None in (length, height, thickness):
-            return
-
-        entity.geometry.bounds.min = [0, 0, 0]
-
-        entity.geometry.bounds.max = [
-            length,
-            thickness,
-            height,
-        ]
+        entity.geometry = GeometryFactory.regenerate(entity)

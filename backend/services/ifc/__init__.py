@@ -10,7 +10,7 @@ Public contract (per SDS 8.2):
   Guarantee:  Spatial tree always valid; all relationships maintained
 """
 
-from services.ifc.entity_store import EntityStore
 from services.ifc.models import IfcEntity, PropertySet, SpatialNode
+from services.ifc.entity_store import EntityStore
 
 __all__ = ["EntityStore", "IfcEntity", "PropertySet", "SpatialNode"]
