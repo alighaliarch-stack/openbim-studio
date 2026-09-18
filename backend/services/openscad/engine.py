@@ -87,3 +87,31 @@ class OpenSCADEngine:
             bounds=bounds,
             render_time_ms=elapsed_ms,
         )
+    # ---------------------------------------------------------------------
+# Current-engine bridge (Step 2).
+#
+# WallGenerator.generate(entity) is reached through the property-edit
+# chain and does not receive a FastAPI Request. The application engine
+# is stored in app.state, so this bridge provides access to that exact
+# existing instance without changing WallGenerator.generate()'s public
+# signature or creating another engine.
+# ---------------------------------------------------------------------
+
+_current_engine: OpenSCADEngine | None = None
+
+
+def set_current_engine(engine: OpenSCADEngine) -> None:
+    """Register engine as the current application OpenSCADEngine."""
+    global _current_engine
+    _current_engine = engine
+
+
+def get_current_engine() -> OpenSCADEngine:
+    """Return the registered application OpenSCADEngine."""
+    if _current_engine is None:
+        raise RuntimeError(
+            "No OpenSCADEngine has been registered. "
+            "set_current_engine() must be called during application "
+            "startup before WallGenerator can render."
+        )
+    return _current_engine

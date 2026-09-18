@@ -34,7 +34,7 @@ from services.llm.llm_client import LLMClient
 from services.llm.output_parser import OutputParser
 from services.openscad.cli_executor import CLIExecutor
 from services.openscad.component_registry import ComponentRegistry
-from services.openscad.engine import OpenSCADEngine
+from services.openscad.engine import OpenSCADEngine, set_current_engine
 from services.openscad.stl_parser import StlParser
 from services.openscad.template_renderer import TemplateRenderer
 
@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI):
 
     app.state.entity_store = entity_store
     app.state.openscad_engine = openscad_engine
+    set_current_engine(openscad_engine)
     app.state.ai_chat_service = ai_chat_service
 
     logger.info("%s ready.", settings.service_name)
