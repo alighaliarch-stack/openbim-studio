@@ -51,6 +51,12 @@ class PropertyEditResponse(BaseModel):
 
     success: bool
     entity: IfcEntity
+    # Day-20: non-silent signal that the property was persisted but the
+    # downstream OpenSCAD/STL regeneration did not produce new geometry
+    # (WallGenerator never raises on failure -- see api/properties.py's
+    # _detect_geometry_regeneration_failure()). None when regeneration
+    # succeeded or wasn't applicable. Additive/optional for compatibility.
+    geometry_warning: str | None = None
 
 
 class ScadRenderRequest(BaseModel):

@@ -17,6 +17,26 @@ import { useState } from "react";
 import { InputField } from "@/components/properties/InputField";
 import type { IfcEntity, PropertySet } from "@/types/entities";
 
+/**
+ * Day-20 client-side bound for the three wall dimensional properties.
+ *
+ * Sourced from the backend: WallGenerator._positive_number() (services/
+ * geometry/wall_generator.py) treats any value <= 0 as invalid and
+ * silently skips regeneration rather than erroring — that's the actual
+ * rule that determines success/failure on this edit path, so the client
+ * mirrors it exactly (exclusive minimum of 0, i.e. value must be > 0).
+ * (ComponentRegistry's wall ParamField also declares `minimum=0` for
+ * these three params, but that bound is inclusive and isn't enforced
+ * against this edit path at all — it only gates POST /api/scad/render's
+ * direct params — so it's not the authoritative source here.)
+ */
+const WALL_DIMENSION_PSET = "Qto_WallBaseQuantities";
+const WALL_DIMENSION_PROPS = new Set(["Length", "Height", "Thickness"]);
+
+function wallDimensionExclusiveMin(psetName: string, prop: string): number | undefined {
+  return psetName === WALL_DIMENSION_PSET && WALL_DIMENSION_PROPS.has(prop) ? 0 : undefined;
+}
+
 interface PropertyGridProps {
   entity: IfcEntity;
   disabled: boolean;
@@ -24,6 +44,10 @@ interface PropertyGridProps {
   savingField?: string | null;
   /** "pset::prop" key whose last save succeeded (auto-cleared by parent). */
   successField?: string | null;
+  /** "pset::prop" key whose last save persisted but didn't regenerate geometry, or null. */
+  geometryWarningField?: string | null;
+  /** Message to show for geometryWarningField, or null. */
+  geometryWarning?: string | null;
   onEdit: (pset: string, prop: string, value: unknown) => void;
 }
 
@@ -32,6 +56,8 @@ export function PropertyGrid({
   disabled,
   savingField = null,
   successField = null,
+  geometryWarningField = null,
+  geometryWarning = null,
   onEdit,
 }: PropertyGridProps) {
   const psetNames = Object.keys(entity.psets);
@@ -50,6 +76,8 @@ export function PropertyGrid({
           disabled={disabled}
           savingField={savingField}
           successField={successField}
+          geometryWarningField={geometryWarningField}
+          geometryWarning={geometryWarning}
           onEdit={(prop, value) => onEdit(psetName, prop, value)}
         />
       ))}
@@ -63,11 +91,14 @@ interface PSetAccordionProps {
   disabled: boolean;
   savingField: string | null;
   successField: string | null;
+  geometryWarningField: string | null;
+  geometryWarning: string | null;
   onEdit: (prop: string, value: unknown) => void;
 }
 
 function PSetAccordion({
-  psetName, pset, disabled, savingField, successField, onEdit,
+  psetName, pset, disabled, savingField, successField,
+  geometryWarningField, geometryWarning, onEdit,
 }: PSetAccordionProps) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -96,6 +127,8 @@ function PSetAccordion({
                 disabled={disabled}
                 isSaving={savingField === key}
                 isSuccess={successField === key}
+                warningMessage={geometryWarningField === key ? geometryWarning : null}
+                exclusiveMin={wallDimensionExclusiveMin(psetName, prop)}
                 onChange={(newValue) => onEdit(prop, newValue)}
               />
             );

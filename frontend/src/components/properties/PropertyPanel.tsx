@@ -28,7 +28,10 @@ import { useSelection } from "@/hooks/useSelection";
 
 export function PropertyPanel() {
   const { primaryEntity, isMultiSelect, selectedEntities } = useSelection();
-  const { editProperty, isSaving, savingField, successField, saveError } = useModel();
+  const {
+    editProperty, isSaving, savingField, successField, saveError,
+    geometryWarningField, geometryWarning,
+  } = useModel();
 
   // Stable wrapper so PropertyGrid/InputField don't get new refs on every render.
   const handleEdit = useCallback(
@@ -111,6 +114,8 @@ export function PropertyPanel() {
         disabled={false}          // grid stays enabled; per-field spinner handles in-flight
         savingField={savingField}
         successField={successField}
+        geometryWarningField={geometryWarningField}
+        geometryWarning={geometryWarning}
         onEdit={handleEdit}
       />
 

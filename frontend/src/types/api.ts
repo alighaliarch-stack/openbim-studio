@@ -31,6 +31,12 @@ export interface PropertyEditRequest {
 export interface PropertyEditResponse {
   success: boolean;
   entity: IfcEntity;
+  /**
+   * Day-20: non-silent signal that the property was persisted but the
+   * downstream OpenSCAD/STL regeneration did not produce new geometry.
+   * null when regeneration succeeded or wasn't applicable to this entity.
+   */
+  geometry_warning: string | null;
 }
 
 export interface ScadRenderRequest {
