@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api.router import api_router
 from core.config import get_settings
@@ -106,6 +107,17 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router)
+
+    # Serve the OpenSCAD engine's rendered STL output over HTTP so
+    # GeometryRef.url values (e.g. "/geometry/<uuid>.stl") are directly
+    # fetchable by the frontend's THREE.STLLoader. Same directory the
+    # engine already writes to (settings.scad_tmp_dir) -- no second
+    # storage system. StaticFiles requires the directory to exist at
+    # mount time, so create it here (CLIExecutor also does this on
+    # first render, but that happens later, during lifespan startup).
+    settings.scad_tmp_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/geometry", StaticFiles(directory=str(settings.scad_tmp_dir)), name="geometry")
+
     return app
 
 

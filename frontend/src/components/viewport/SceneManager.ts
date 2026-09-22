@@ -12,16 +12,16 @@
  * MVP scope: orbit camera (via OrbitControls: right-drag orbit, middle-drag
  * pan, wheel zoom -- left mouse is deliberately left unbound from camera
  * control so it's free for selection, see mount()) + raycaster picking +
- * placeholder box geometry (bounding-box rendering, per
- * MVP_Summary_and_Overview.md "Parsing real STL files is too complex; use
- * bounding box -> BoxGeometry").
+ * real STL geometry via loadMeshFromStl(), with the bounding-box
+ * placeholder (loadMesh()) kept as the fallback shown while an STL
+ * streams in and if it fails to load.
  *
- * TODO(Phase 2): Load real STL geometry via THREE.STLLoader instead of
- * bounding-box placeholders; add SelectionGizmo (three-transform-controls).
+ * TODO(Phase 2): add SelectionGizmo (three-transform-controls).
  */
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
 import type { GeometryBounds } from "@/types/entities";
 
@@ -39,6 +39,14 @@ export class SceneManager {
   private controls: OrbitControls | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly meshesByGuid = new Map<string, MeshEntry>();
+  private readonly stlLoader = new STLLoader();
+  /**
+   * Per-guid counter guarding against out-of-order async STL loads: each
+   * loadMesh()/loadMeshFromStl() call bumps its guid's token, and an
+   * in-flight STLLoader callback discards its result if the token has
+   * moved on by the time it resolves (a newer load superseded it).
+   */
+  private readonly loadTokensByGuid = new Map<string, number>();
   private animationFrameId: number | null = null;
 
   constructor() {
@@ -108,12 +116,49 @@ export class SceneManager {
    * matching `bounds`.
    */
   loadMesh(guid: string, bounds: GeometryBounds): void {
-    const existing = this.meshesByGuid.get(guid);
-    if (existing) {
-      this.disposeMesh(existing.mesh);
-      this.meshesByGuid.delete(guid);
-    }
+    this.bumpLoadToken(guid);
+    this.setMeshEntry(guid, this.buildBoxEntry(guid, bounds));
+  }
 
+  /**
+   * Load real STL geometry for `guid` from `url` (a GeometryRef.url, e.g.
+   * "/geometry/<uuid>.stl") and swap it in once loaded. `bounds` is shown
+   * immediately as a placeholder (via the same box geometry loadMesh()
+   * uses) so the viewport isn't empty while the STL streams in, and stays
+   * in place as the fallback if the STL fails to load (missing file,
+   * network error, parse error) -- e.g. seed data referencing an STL the
+   * current pipeline never generated.
+   *
+   * Safe against out-of-order async completion: if another load call for
+   * the same `guid` arrives before this STL finishes fetching/parsing,
+   * this load's result is discarded without touching the scene.
+   */
+  loadMeshFromStl(guid: string, url: string, bounds: GeometryBounds): void {
+    const token = this.bumpLoadToken(guid);
+    this.setMeshEntry(guid, this.buildBoxEntry(guid, bounds));
+
+    this.stlLoader.load(
+      url,
+      (geometry) => {
+        if (this.loadTokensByGuid.get(guid) !== token) {
+          geometry.dispose();
+          return;
+        }
+        const baseColor = new THREE.Color(0xb0b8c1);
+        const material = new THREE.MeshLambertMaterial({ color: baseColor });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.userData.guid = guid;
+        this.setMeshEntry(guid, { mesh, baseColor });
+      },
+      undefined,
+      () => {
+        // Load/parse failed -- the box placeholder set above already
+        // covers this as the fallback; nothing else to do.
+      }
+    );
+  }
+
+  private buildBoxEntry(guid: string, bounds: GeometryBounds): MeshEntry {
     const size = new THREE.Vector3(
       bounds.max[0] - bounds.min[0],
       bounds.max[1] - bounds.min[1],
@@ -131,9 +176,24 @@ export class SceneManager {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(center);
     mesh.userData.guid = guid;
+    return { mesh, baseColor };
+  }
 
-    this.scene.add(mesh);
-    this.meshesByGuid.set(guid, { mesh, baseColor });
+  /** Dispose `guid`'s previous mesh (if any) and add the new one. */
+  private setMeshEntry(guid: string, entry: MeshEntry): void {
+    const existing = this.meshesByGuid.get(guid);
+    if (existing) {
+      this.disposeMesh(existing.mesh);
+      this.meshesByGuid.delete(guid);
+    }
+    this.scene.add(entry.mesh);
+    this.meshesByGuid.set(guid, entry);
+  }
+
+  private bumpLoadToken(guid: string): number {
+    const token = (this.loadTokensByGuid.get(guid) ?? 0) + 1;
+    this.loadTokensByGuid.set(guid, token);
+    return token;
   }
 
   /** FR-043: Raycast from normalized device coords, return hit guid or null. */

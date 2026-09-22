@@ -4,10 +4,11 @@
  * M06 Geometry Manager — MeshLoader (SDS Section 3, M06 "MeshLoader
  * (STL -> BufferGeometry)").
  *
- * MVP: derives a placeholder box from GeometryRef.bounds rather than
- * parsing the actual STL client-side (SceneManager.loadMesh already
- * takes bounds directly). This module exists as the seam where real STL
- * loading will be inserted in Phase 2.
+ * Loads real STL geometry from `entity.geometry.url` (via
+ * SceneManager.loadMeshFromStl, which uses THREE.STLLoader). Falls back
+ * to a bounds-derived placeholder box when an entity has no url, or when
+ * the STL fails to fetch/parse (SceneManager handles that fallback
+ * internally, since it owns the async load).
  */
 
 import type { SceneManager } from "@/components/viewport/SceneManager";
@@ -20,15 +21,16 @@ export class MeshLoader {
    * Load geometry for every entity that has a `geometry` ref into the
    * scene. Entities without geometry (e.g. spatial containers like
    * IfcBuildingStorey) are skipped.
-   *
-   * TODO(Phase 2): Fetch and parse the actual STL bytes from
-   * `entity.geometry.url` via THREE.STLLoader instead of using bounds
-   * as a box placeholder.
    */
   loadEntities(entities: IfcEntity[]): void {
     for (const entity of entities) {
-      if (entity.geometry) {
-        this.sceneManager.loadMesh(entity.guid, entity.geometry.bounds);
+      const geometry = entity.geometry;
+      if (!geometry) continue;
+
+      if (geometry.url) {
+        this.sceneManager.loadMeshFromStl(entity.guid, geometry.url, geometry.bounds);
+      } else {
+        this.sceneManager.loadMesh(entity.guid, geometry.bounds);
       }
     }
   }

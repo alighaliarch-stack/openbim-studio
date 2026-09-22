@@ -17,6 +17,7 @@ No fallback geometry is fabricated in either case.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import NamedTuple
 
 from services.ifc.models import GeometryRef, IfcEntity
@@ -55,8 +56,14 @@ class WallGenerator:
         new_bounds = geometry.bounds.model_copy(
             update={"min": result.bounds.min, "max": result.bounds.max}
         )
+        # result.stl_path is an absolute filesystem path under
+        # settings.scad_tmp_dir (CLIExecutor internals); that path must
+        # stay internal to the backend. main.py mounts scad_tmp_dir at
+        # /geometry, so the browser-fetchable URL is just that prefix
+        # plus the file's own name.
+        public_url = f"/geometry/{Path(result.stl_path).name}"
         return geometry.model_copy(
-            update={"bounds": new_bounds, "url": result.stl_path}
+            update={"bounds": new_bounds, "url": public_url}
         )
 
     @staticmethod
