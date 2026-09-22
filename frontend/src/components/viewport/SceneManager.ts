@@ -39,6 +39,16 @@ export class SceneManager {
   private controls: OrbitControls | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly meshesByGuid = new Map<string, MeshEntry>();
+  /**
+   * Day-21: last highlight mode requested for each guid, independent of
+   * which mesh currently represents it. highlight() records here (not
+   * just on the current mesh) so that when setMeshEntry() later swaps in
+   * a *new* mesh for the same guid -- notably the async STL swap-in from
+   * loadMeshFromStl(), which happens outside any React render cycle and
+   * would otherwise default to the unselected color -- it can reapply
+   * the guid's actual current highlight instead of losing it.
+   */
+  private readonly highlightByGuid = new Map<string, HighlightMode>();
   private readonly stlLoader = new STLLoader();
   /**
    * Per-guid counter guarding against out-of-order async STL loads: each
@@ -179,7 +189,15 @@ export class SceneManager {
     return { mesh, baseColor };
   }
 
-  /** Dispose `guid`'s previous mesh (if any) and add the new one. */
+  /**
+   * Dispose `guid`'s previous mesh (if any) and add the new one.
+   *
+   * Day-21: also reapplies `guid`'s last-known highlight mode (default
+   * "none" if never set) to the newly-added mesh, so a mesh swap --
+   * synchronous (box placeholder) or asynchronous (STL finishing load,
+   * see loadMeshFromStl()) -- never silently drops a selection/hover
+   * highlight the guid currently has.
+   */
   private setMeshEntry(guid: string, entry: MeshEntry): void {
     const existing = this.meshesByGuid.get(guid);
     if (existing) {
@@ -188,6 +206,8 @@ export class SceneManager {
     }
     this.scene.add(entry.mesh);
     this.meshesByGuid.set(guid, entry);
+
+    this.applyHighlight(entry, this.highlightByGuid.get(guid) ?? "none");
   }
 
   private bumpLoadToken(guid: string): number {
@@ -246,10 +266,29 @@ export class SceneManager {
     this.controls.update();
   }
 
-  /** Apply a highlight color to `guid`'s mesh (selection/hover feedback). */
+  /**
+   * Apply a highlight color to `guid`'s mesh (selection/hover feedback).
+   *
+   * Day-21: always records `mode` as `guid`'s latest highlight (even if
+   * no mesh currently exists for it), so a future setMeshEntry() call
+   * for this guid -- including the async STL swap-in -- can reapply it.
+   * "none" is the implicit default (see setMeshEntry()'s `?? "none"`),
+   * so it's removed rather than stored, to avoid retaining a permanent
+   * entry for every guid that has ever been deselected.
+   */
   highlight(guid: string, mode: HighlightMode): void {
+    if (mode === "none") {
+      this.highlightByGuid.delete(guid);
+    } else {
+      this.highlightByGuid.set(guid, mode);
+    }
     const entry = this.meshesByGuid.get(guid);
     if (!entry) return;
+    this.applyHighlight(entry, mode);
+  }
+
+  /** Set `entry`'s mesh material color for `mode`. Shared by highlight() and setMeshEntry(). */
+  private applyHighlight(entry: MeshEntry, mode: HighlightMode): void {
     const material = entry.mesh.material as THREE.MeshLambertMaterial;
     if (mode === "selected") {
       material.color.set(0xff8c1a);
