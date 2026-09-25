@@ -21,6 +21,9 @@
  *   4. Day-23: the grid IS now disabled while a save is in flight (the
  *      per-field "…" still marks which field is saving), and the global
  *      saving message says geometry is regenerating when it is.
+ *   5. Day-24: save-failed banner and per-field …/✓/⚠ are shown only while
+ *      the entity they belong to (useModel's feedbackGuid) is selected, so
+ *      one entity's failure never appears on another entity's panel.
  */
 
 import { useCallback } from "react";
@@ -33,7 +36,7 @@ export function PropertyPanel() {
   const { primaryEntity, isMultiSelect, selectedEntities } = useSelection();
   const {
     editProperty, isSaving, savingField, successField, saveError,
-    geometryWarningField, geometryWarning,
+    geometryWarningField, geometryWarning, feedbackGuid,
   } = useModel();
 
   // Stable wrapper so PropertyGrid/InputField don't get new refs on every render.
@@ -78,6 +81,9 @@ export function PropertyPanel() {
 
   // ── Single-entity view ────────────────────────────────────────────────────
 
+  // Day-24: only show edit feedback that belongs to the selected entity.
+  const ownsFeedback = feedbackGuid === primaryEntity.guid;
+
   return (
     <div className="property-panel">
 
@@ -105,7 +111,7 @@ export function PropertyPanel() {
       )}
 
       {/* Save error banner */}
-      {saveError && (
+      {saveError && ownsFeedback && (
         <div className="property-panel__error" role="alert">
           <strong>Save failed:</strong> {saveError}
         </div>
@@ -118,9 +124,9 @@ export function PropertyPanel() {
       <PropertyGrid
         entity={primaryEntity}
         disabled={isSaving}
-        savingField={savingField}
-        successField={successField}
-        geometryWarningField={geometryWarningField}
+        savingField={ownsFeedback ? savingField : null}
+        successField={ownsFeedback ? successField : null}
+        geometryWarningField={ownsFeedback ? geometryWarningField : null}
         geometryWarning={geometryWarning}
         onEdit={handleEdit}
       />
