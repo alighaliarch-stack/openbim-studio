@@ -15,7 +15,7 @@
  *   3. On FAILURE: still reverts via refetch() as before.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { apiClient, useModelContext } from "@/context/ModelContext";
 
@@ -55,9 +55,18 @@ export function useModel(): UseModelResult {
   const [geometryWarningField, setGeometryWarningField] = useState<string | null>(null);
   const [geometryWarning, setGeometryWarning] = useState<string | null>(null);
 
+  /**
+   * Day-23: id of the most recently started edit. Each editProperty call
+   * takes the next id; only the latest edit may clear isSaving /
+   * savingField when it settles, so an older request finishing first
+   * can't hide the saving indicator of a newer one still in flight.
+   */
+  const latestRequestIdRef = useRef(0);
+
   const editProperty = useCallback(
     async (guid: string, pset: string, prop: string, value: unknown) => {
       const key = fieldKey(pset, prop);
+      const requestId = ++latestRequestIdRef.current;
 
       setIsSaving(true);
       setSavingField(key);
@@ -98,8 +107,10 @@ export function useModel(): UseModelResult {
         setSaveError(err instanceof Error ? err.message : "Failed to save property");
         await refetch();
       } finally {
-        setIsSaving(false);
-        setSavingField(null);
+        if (requestId === latestRequestIdRef.current) {
+          setIsSaving(false);
+          setSavingField(null);
+        }
       }
     },
     [applyPropertyEdit, applyConfirmedEntity, refetch]

@@ -18,6 +18,9 @@
  *      so InputField can show per-row "…" / "✓" without disabling the grid.
  *   2. Clears saveError automatically when the user starts a new edit.
  *   3. Multi-select branch kept — no editing (deferred to Phase 2).
+ *   4. Day-23: the grid IS now disabled while a save is in flight (the
+ *      per-field "…" still marks which field is saving), and the global
+ *      saving message says geometry is regenerating when it is.
  */
 
 import { useCallback } from "react";
@@ -108,10 +111,13 @@ export function PropertyPanel() {
         </div>
       )}
 
-      {/* Property grid — per-field saving/success passed down */}
+      {/* Property grid — per-field saving/success passed down. Day-23: the
+          whole grid is locked while a save is in flight so a second edit
+          can't overlap the first (the backend regenerates geometry for
+          one edit at a time anyway). */}
       <PropertyGrid
         entity={primaryEntity}
-        disabled={false}          // grid stays enabled; per-field spinner handles in-flight
+        disabled={isSaving}
         savingField={savingField}
         successField={successField}
         geometryWarningField={geometryWarningField}
@@ -119,10 +125,12 @@ export function PropertyPanel() {
         onEdit={handleEdit}
       />
 
-      {/* Global saving indicator (fallback for screen readers / no-JS) */}
+      {/* Global saving indicator (fallback for screen readers / no-JS).
+          Day-23: an edit on an entity with geometry also regenerates that
+          geometry server-side within the same request, so say so. */}
       {isSaving && (
         <div className="property-panel__saving" aria-live="polite">
-          Saving…
+          {primaryEntity.geometry ? "Saving and regenerating geometry…" : "Saving…"}
         </div>
       )}
     </div>
