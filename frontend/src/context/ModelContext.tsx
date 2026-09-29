@@ -97,6 +97,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const applyConfirmedEntity = useCallback(
     (guid: string, entity: IfcEntity) => {
       setEntities((prev) => ({ ...prev, [guid]: entity }));
+      setError(null);
       setLastModified(new Date());
     },
     []
