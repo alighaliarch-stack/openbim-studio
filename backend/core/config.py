@@ -34,7 +34,11 @@ class Settings:
 
     # --- Storage (M10 IFC Semantic Layer persistence) ---
     data_dir: Path = field(default_factory=lambda: BACKEND_ROOT / "data")
-    model_json_path: Path = field(default_factory=lambda: BACKEND_ROOT / "data" / "model.json")
+    # Day-25: MODEL_JSON_PATH overrides the model file only when explicitly
+    # set (used by the workflow tests to run against a temporary model).
+    model_json_path: Path = field(
+        default_factory=lambda: Path(os.getenv("MODEL_JSON_PATH") or BACKEND_ROOT / "data" / "model.json")
+    )
 
     # --- OpenSCAD Engine (M08) ---
     templates_dir: Path = field(default_factory=lambda: BACKEND_ROOT / "templates")
