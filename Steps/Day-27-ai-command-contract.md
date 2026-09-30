@@ -109,7 +109,7 @@ Mutation check (on a throwaway copy): removing the finite check, accepting `cm`,
 - Reuse the existing `Command` envelope and `CommandType.EDIT_PROPERTY`; type only its params.
 - Whitelist by IFC type → property set → property (`EDITABLE_PROPERTIES`), limited to what WallGenerator turns into geometry.
 - Require an explicit unit; only `mm` and `m`.
-- Upper bound of 100 m (decision for review).
+- MVP safety bound (confirmed Day 27 decision): accepted values must satisfy 0 < value ≤ 100 m. This is an application-level safety constraint for the MVP, not an IFC, BIM, structural, or physical maximum.
 - Edit existing properties only (`property_not_present`), because `set_prop` would otherwise create new property sets.
 - Execution always re-validates; there is no path to `set_prop` that skips validation.
 
