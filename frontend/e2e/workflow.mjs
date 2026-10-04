@@ -9,6 +9,22 @@
  *   highlight preserved -> double-click focus
  * and repeats the Length -> Height -> Thickness sequence twice.
  *
+ * Day-28: between the two rounds, two edits are rejected:
+ *   N1 -- a real backend rejection: Length 100001 mm passes the client's
+ *         > 0 check but the backend refuses it with 422 (100 m bound).
+ *   N2 -- an INJECTED response, not a real backend or OpenSCAD failure:
+ *         the browser intercepts the POST with CDP Fetch and answers it
+ *         with a 502 body in the backend's ErrorResponse shape; the
+ *         backend is never called. N2 tests frontend handling of a 502
+ *         only. Its N2c check (model file unchanged) is trivially true,
+ *         since the request never reaches the backend, and is not
+ *         evidence of backend atomicity. Real 502 behaviour (OpenSCAD
+ *         failures, rollback) is covered by
+ *         backend/tests/test_property_transaction.py, not by N2.
+ * Each must show the error message, revert the input, fetch no new STL,
+ * and keep the committed mesh and selection. Round 2 then proves editing
+ * recovers.
+ *
  * Isolation: starts its own backend with MODEL_JSON_PATH / SCAD_TMP_DIR
  * pointing at a temporary directory seeded with a realistic wall
  * (5000 x 3000 x 200 mm), so backend/data/model.json is never read or
@@ -466,8 +482,13 @@ async function main() {
     // Error and network recording.
     const appErrors = [];
     const requests = new Map(); // requestId -> { url, method, status, finished, failed }
+    const expectedFailedRequestIds = new Set(); // deliberately rejected edits (N checks)
+    let onFetchPaused = null; // set while a Fetch interception is active
     cdp.on((method, params) => {
-      if (method === "Runtime.exceptionThrown") {
+      if (method === "Fetch.requestPaused") {
+        if (onFetchPaused) onFetchPaused(params);
+        else cdp.send("Fetch.continueRequest", { requestId: params.requestId }).catch(() => {});
+      } else if (method === "Runtime.exceptionThrown") {
         appErrors.push(`exception: ${params.exceptionDetails.exception?.description ?? params.exceptionDetails.text}`);
       } else if (method === "Runtime.consoleAPICalled" && (params.type === "error" || params.type === "assert")) {
         appErrors.push(`console.${params.type}: ${params.args.map((a) => a.value ?? a.description).join(" ")}`);
@@ -532,6 +553,89 @@ async function main() {
       const x = rect.x + px + 0.5, y = rect.y + py + 0.5;
       const hit = await evaluate(`document.elementFromPoint(${x}, ${y})?.classList.contains("viewport__canvas") ?? false`);
       return { x, y, hit };
+    };
+
+    /**
+     * Day-28: type `value` into `prop` and expect the edit to be rejected
+     * with `status`. `confirmed` holds the committed quantities and
+     * `committedUrl` the committed STL. With `interceptBody`, the browser
+     * intercepts the POST and answers it with that body; the backend is
+     * never called, so only frontend handling is exercised.
+     */
+    const rejectedEdit = async ({ tag, prop, value, status, message, confirmed, committedUrl, interceptBody }) => {
+      const persistedBefore = fs.readFileSync(modelPath);
+      const requestCount = requests.size;
+      const errorCount = appErrors.length;
+      const newRequests = () => [...requests.entries()].slice(requestCount);
+
+      if (interceptBody) {
+        onFetchPaused = (params) => cdp.send("Fetch.fulfillRequest", {
+          requestId: params.requestId,
+          responseCode: status,
+          responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+          body: Buffer.from(JSON.stringify(interceptBody)).toString("base64"),
+        }).catch(() => {});
+        await cdp.send("Fetch.enable", { patterns: [{ urlPattern: `*/api/properties/${WALL_GUID}`, requestStage: "Request" }] });
+      }
+
+      const field = await waitFor(async () => {
+        const f = await evaluate(fieldExpression(prop));
+        return f && !f.disabled ? f : null;
+      }, `${tag} ${prop} field enabled`, 10_000);
+      await click(field.x, field.y);
+      await key("a", "KeyA", 65, { modifiers: process.platform === "darwin" ? 4 : 2, commands: ["selectAll"] });
+      await cdp.send("Input.insertText", { text: String(value) });
+      await key("Enter", "Enter", 13);
+
+      const post = await waitFor(() => newRequests().find(([, r]) =>
+        r.method === "POST" && r.url.endsWith(`/api/properties/${WALL_GUID}`) && (r.finished || r.failed)) ?? null,
+      `${tag} POST finished`, 30_000);
+      if (interceptBody) {
+        await cdp.send("Fetch.disable");
+        onFetchPaused = null;
+      }
+      expectedFailedRequestIds.add(post[0]);
+      const body = JSON.parse((await cdp.send("Network.getResponseBody", { requestId: post[0] })).body);
+
+      // Settled: error shown, refetch done, committed STL mesh back in place.
+      const settled = await waitFor(async () => {
+        const f = await evaluate(fieldExpression(prop));
+        const p = await panel();
+        const refetched = newRequests().some(([, r]) => r.method === "GET" && r.url.endsWith("/api/model") && r.finished);
+        return !p.saving && p.error && refetched && f && !f.disabled ? { f, p } : null;
+      }, `${tag} rejection settled`, 15_000);
+      const dims = dimsOf(confirmed);
+      await waitFor(async () => {
+        const q = await probe();
+        return q.hasMesh && q.geometryType === "BufferGeometry" && q.max.every((v, i) => near(v, dims[i], 1e-3)) ? q : null;
+      }, `${tag} committed mesh shown`, 15_000);
+      await sleep(300);
+      const after = await probe();
+      const p = await panel();
+      const stlFetches = newRequests().map(([, r]) => r).filter((r) => r.url.includes("/geometry/"));
+
+      check(`${tag}`, interceptBody
+        ? `INJECTED HTTP ${status} for ${prop}=${value}: request intercepted in the browser, backend not called (frontend handling only)`
+        : `real backend rejects ${prop}=${value} with HTTP ${status}`,
+        post[1].status === status && body.detail?.success === false && typeof body.detail?.code === "string",
+        `status ${post[1].status}, code ${body.detail?.code}`);
+      check(`${tag}a`, `UI shows the ${interceptBody ? "injected" : "backend's"} error message and reverts the input to the committed value`,
+        settled.p.error.includes(message) && settled.f.value === String(confirmed[prop]) && !settled.p.geometryWarning,
+        `"${settled.p.error}", input ${settled.f.value}`);
+      check(`${tag}b`, "no new STL fetched; viewport shows the committed mesh, still selected",
+        stlFetches.every((r) => r.url.endsWith(committedUrl)) && after.geometryType === "BufferGeometry"
+          && after.min.every((v) => near(v, 0, 1e-3)) && after.max.every((v, i) => near(v, dims[i], 1e-3))
+          && after.meshCount === 1 && after.highlight === "selected" && after.color === SELECTED_HEX
+          && p.name === WALL_NAME && p.treeSelected.includes(WALL_NAME),
+        `${stlFetches.length} STL fetches, ${after.geometryType}, max ${JSON.stringify(after.max)}, highlight ${after.highlight}`);
+      check(`${tag}c`, interceptBody
+        ? "temporary model on disk unchanged (trivially true: the backend was never called; not evidence of backend atomicity)"
+        : "temporary model on disk unchanged (byte-identical)", fs.readFileSync(modelPath).equals(persistedBefore));
+
+      // Only the browser's own reports of this rejection may have been logged.
+      const newErrors = appErrors.splice(errorCount);
+      const unexpected = newErrors.filter((e) => !/Property edit failed|status of (422|502)/.test(e));
+      check(`${tag}d`, "only the expected rejection errors were logged", unexpected.length === 0, unexpected.join(" | "));
     };
 
     // ── Load ──
@@ -691,10 +795,29 @@ async function main() {
         focused && focused.uuid === meshBefore.uuid && centred && p.name === WALL_NAME && focused.highlight === "selected",
         `target ${JSON.stringify(focused?.target)}, expected ${JSON.stringify(center)}, `
           + `on-screen centroid (${afterFocus.cx?.toFixed(0)}, ${afterFocus.cy?.toFixed(0)}) of ${width}x${height}`);
+
+      // ── N. Day-28: rejected edits change nothing (round 2 then proves recovery).
+      //    N1 is a real backend 422; N2 is an injected 502 (backend not called). ──
+      if (round === 1) {
+        await rejectedEdit({
+          tag: "N1", prop: "Length", value: 100001, status: 422, message: "Invalid value",
+          confirmed: expected, committedUrl: currentUrl,
+        });
+        await rejectedEdit({
+          tag: "N2", prop: "Height", value: 3300, status: 502, message: "Geometry could not be regenerated",
+          confirmed: expected, committedUrl: currentUrl,
+          interceptBody: { detail: {
+            success: false, error: "Geometry could not be regenerated; the change was not saved.",
+            detail: "OpenSCAD did not produce new geometry", code: "geometry_regeneration_failed",
+          } },
+        });
+      }
     }
 
     // ── K / L ──
-    const httpErrors = [...requests.values()]
+    const httpErrors = [...requests.entries()]
+      .filter(([id]) => !expectedFailedRequestIds.has(id))
+      .map(([, r]) => r)
       .filter((r) => ((r.status !== null && r.status >= 400) || r.failed) && !isBrowserFaviconNoise(r.url));
     const unexpectedAppErrors = appErrors.filter((e) => !isBrowserFaviconNoise(e));
     const backendErrors = backendLog.join("").split(/\r?\n/).filter((l) => /Traceback|^ERROR|\bERROR:/.test(l));

@@ -51,11 +51,10 @@ class PropertyEditResponse(BaseModel):
 
     success: bool
     entity: IfcEntity
-    # Day-20: non-silent signal that the property was persisted but the
-    # downstream OpenSCAD/STL regeneration did not produce new geometry
-    # (WallGenerator never raises on failure -- see api/properties.py's
-    # _detect_geometry_regeneration_failure()). None when regeneration
-    # succeeded or wasn't applicable. Additive/optional for compatibility.
+    # Day-20: signalled that the property was persisted but geometry was
+    # not regenerated. Day-28: edits are atomic (a failed regeneration
+    # rejects the edit with HTTP 502), so this is always None; kept for
+    # compatibility with existing clients.
     geometry_warning: str | None = None
 
 
@@ -89,6 +88,8 @@ class ErrorResponse(BaseModel):
     success: bool = False
     error: str
     detail: str | None = None
+    # Day-28: optional machine-readable reason, e.g. "validation_failed".
+    code: str | None = None
 
 
 # Re-exported for convenience so route modules can `from api.schemas import AIResponse`.

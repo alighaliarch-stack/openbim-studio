@@ -18,6 +18,10 @@
  *      fails), reports an actionable message (see describeSaveFailure),
  *      and exposes `feedbackGuid` so feedback is shown only for the
  *      entity it belongs to.
+ *   5. Day-28: backend edits are atomic -- a rejected edit (422 invalid
+ *      value, 502 geometry not regenerated, 500 model not saved) changed
+ *      nothing server-side, so the existing revert + refetch path applies
+ *      unchanged; structured 5xx rejections now show the backend's message.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -63,17 +67,31 @@ function backendErrorText(body: unknown): string | null {
   return null;
 }
 
+/** Day-28: true for the backend's own ErrorResponse envelope ({"detail": {"error": "..."}}). */
+function isStructuredError(body: unknown): boolean {
+  if (!body || typeof body !== "object" || !("detail" in body)) return false;
+  const detail = (body as { detail: unknown }).detail;
+  return Boolean(detail) && typeof detail === "object" && typeof (detail as { error?: unknown }).error === "string";
+}
+
 /**
  * Day-24: turn a failed editProperty request into a message the user can
  * act on, instead of the raw "POST /properties/<guid> failed with status N".
  *   - fetch itself threw (no HTTP response)  -> backend unreachable
- *   - 5xx: in dev the Vite proxy also answers 500 when the backend is down,
- *     so probe GET /api/health once to tell "unreachable" from a genuine
- *     server-side failure
+ *   - 5xx with a structured ErrorResponse (Day-28: 502 geometry regeneration
+ *     failed, 500 model not saved) -> the backend's own error text; the
+ *     backend answered, and the edit was rejected without changing anything
+ *   - other 5xx: in dev the Vite proxy also answers 500 when the backend is
+ *     down, so probe GET /api/health once to tell "unreachable" from a
+ *     genuine server-side failure
  *   - 4xx -> the backend's own error text, when it sent any
  */
 async function describeSaveFailure(err: unknown): Promise<string> {
   if (!(err instanceof ApiError)) return UNREACHABLE_MESSAGE;
+
+  if (err.status >= 500 && isStructuredError(err.detail)) {
+    return backendErrorText(err.detail) ?? SERVER_ERROR_MESSAGE;
+  }
 
   if (err.status >= 500) {
     try {

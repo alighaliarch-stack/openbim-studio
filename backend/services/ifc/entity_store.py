@@ -1,8 +1,10 @@
 from __future__ import annotations
 import logging
 from collections.abc import Callable
+from enum import Enum
 from typing import Any
 from core.persistence import ModelPersistence
+from services.ifc.geometry_inputs import GEOMETRY_INPUTS, dimension_error, drives_geometry
 from services.ifc.models import IfcEntity, ModelDocument, SpatialNode
 
 logger = logging.getLogger(__name__)
@@ -10,6 +12,20 @@ ChangeCallback = Callable[[str, str, dict[str, Any]], None]
 
 class EntityNotFoundError(KeyError):
     pass
+
+class EditRejectionReason(str, Enum):
+    VALIDATION_FAILED = "validation_failed"
+    NO_EXISTING_GEOMETRY = "no_existing_geometry"
+    GEOMETRY_REGENERATION_FAILED = "geometry_regeneration_failed"
+    PERSISTENCE_FAILED = "persistence_failed"
+
+class PropertyEditRejected(RuntimeError):
+    """A property edit was not applied. The committed model (memory and disk) is unchanged."""
+
+    def __init__(self, reason: EditRejectionReason, detail: str) -> None:
+        super().__init__(f"{reason.value}: {detail}")
+        self.reason = reason
+        self.detail = detail
 
 class EntityStore:
     def __init__(self, persistence: ModelPersistence) -> None:
@@ -28,10 +44,13 @@ class EntityStore:
         self._entities = {e.guid: e for e in document.entities}
         self._tree_cache = None
 
-    def _persist(self) -> None:
+    def _persist(self, entities: dict[str, IfcEntity] | None = None) -> None:
+        # Day-28: `entities` lets set_prop() save a candidate model before
+        # committing it to memory; defaults to the committed model.
+        entities = self._entities if entities is None else entities
         document = ModelDocument(
             project={"guid": self._project_guid, "name": self._project_name, "description": ""},
-            entities=list(self._entities.values()),
+            entities=list(entities.values()),
         )
         self._persistence.save(document.model_dump(mode="json"))
 
@@ -57,22 +76,93 @@ class EntityStore:
         """
         FR-073 / Flow 1 step "M10: Update entity in-memory".
 
-        Updates a single property within a PSet, regenerates the
-        entity's geometry to reflect the new value, persists to disk,
-        and notifies subscribers with a "property_edited" change event.
+        Day-28: atomic (copy-on-write). The edit is applied to a deep copy
+        of the entity; the live entity is never mutated. For a property
+        that drives geometry, the value is validated and geometry is
+        regenerated on the copy; the candidate model is then persisted
+        atomically, and only after that succeeds does the copy replace the
+        live entity and subscribers get a "property_edited" event.
 
-        Execution order matters: geometry is regenerated before persist
-        so the on-disk model.json never captures stale geometry from
-        before this edit, and before notify so subscribers reacting to
-        the event see the regenerated geometry, not the pre-edit value.
+        Any rejection raises PropertyEditRejected and leaves the committed
+        model unchanged in memory and on disk (ModelPersistence.save()
+        never replaces model.json with a partial write). Properties that
+        don't drive geometry are saved without regenerating it.
+
+        Raises:
+            EntityNotFoundError: unknown guid.
+            PropertyEditRejected: validation, regeneration or persistence failed.
         """
-        entity = self.get_entity(guid)
-        entity.psets.setdefault(pset, {})[prop] = value
-        from services.geometry.parametric_geometry import ParametricGeometry
-        ParametricGeometry.regenerate(entity)
-        self._persist()
+        current = self.get_entity(guid)
+        regenerate = drives_geometry(current.type, pset, prop)
+        if regenerate:
+            self._validate_geometry_edit(current, pset, prop, value)
+
+        candidate = current.model_copy(deep=True)
+        candidate.psets.setdefault(pset, {})[prop] = value
+
+        if regenerate:
+            self._check_geometry_inputs(candidate)
+            self._regenerate_geometry(candidate, current)
+
+        candidate_entities = {**self._entities, guid: candidate}
+        try:
+            self._persist(candidate_entities)
+        except Exception as exc:
+            logger.exception("Persisting edit of %s.%s on %s failed", pset, prop, guid)
+            raise PropertyEditRejected(
+                EditRejectionReason.PERSISTENCE_FAILED, f"model.json could not be written: {exc}"
+            ) from exc
+
+        self._entities = candidate_entities
         self._notify(guid, "property_edited", {"pset": pset, "prop": prop, "value": value})
-        return entity
+        return candidate
+
+    @staticmethod
+    def _validate_geometry_edit(entity: IfcEntity, pset: str, prop: str, value: Any) -> None:
+        problem = dimension_error(value)
+        if problem:
+            raise PropertyEditRejected(EditRejectionReason.VALIDATION_FAILED, f"{pset}.{prop} {problem}")
+        if entity.geometry is None:
+            raise PropertyEditRejected(
+                EditRejectionReason.NO_EXISTING_GEOMETRY,
+                f"'{entity.guid}' has no existing geometry to regenerate from {pset}.{prop}",
+            )
+
+    @staticmethod
+    def _check_geometry_inputs(candidate: IfcEntity) -> None:
+        # The generator needs every input of the edited entity, not just the
+        # edited one; a missing/invalid stored value is reported as such
+        # rather than as a geometry-kernel failure.
+        for pset, props in GEOMETRY_INPUTS.get(candidate.type, {}).items():
+            for prop in sorted(props):
+                if prop not in candidate.psets.get(pset, {}):
+                    raise PropertyEditRejected(
+                        EditRejectionReason.VALIDATION_FAILED, f"{pset}.{prop} is missing on '{candidate.guid}'"
+                    )
+                problem = dimension_error(candidate.psets[pset][prop])
+                if problem:
+                    raise PropertyEditRejected(
+                        EditRejectionReason.VALIDATION_FAILED, f"stored {pset}.{prop} {problem}"
+                    )
+
+    @staticmethod
+    def _regenerate_geometry(candidate: IfcEntity, current: IfcEntity) -> None:
+        from services.geometry.parametric_geometry import ParametricGeometry
+        try:
+            ParametricGeometry.regenerate(candidate)
+        except Exception as exc:
+            logger.exception("Geometry regeneration for %s raised", candidate.guid)
+            raise PropertyEditRejected(
+                EditRejectionReason.GEOMETRY_REGENERATION_FAILED, f"geometry regeneration raised: {exc}"
+            ) from exc
+        # Generators never raise on expected failures (invalid inputs,
+        # OpenSCAD error, timeout, bad STL); they return the previous
+        # GeometryRef unchanged, while every successful render gets a new
+        # uuid-named STL url (see wall_generator.py / cli_executor.py).
+        if candidate.geometry is None or candidate.geometry.url == current.geometry.url:
+            raise PropertyEditRejected(
+                EditRejectionReason.GEOMETRY_REGENERATION_FAILED, "OpenSCAD did not produce new geometry"
+            )
 
     def add_entity(self, entity: IfcEntity) -> IfcEntity:
         if entity.guid in self._entities:
@@ -91,8 +181,13 @@ class EntityStore:
         self._subscribers.setdefault(guid, []).append(callback)
 
     def _notify(self, guid: str, change_type: str, payload: dict[str, Any]) -> None:
+        # Day-28: runs after a change is committed, so a failing subscriber
+        # is logged rather than turning a committed edit into an error.
         for callback in self._subscribers.get(guid, []):
-            callback(guid, change_type, payload)
+            try:
+                callback(guid, change_type, payload)
+            except Exception:
+                logger.exception("Subscriber for %s failed on %s", guid, change_type)
 
     def _build_tree(self) -> list[SpatialNode]:
         def build_node(entity: IfcEntity) -> SpatialNode:

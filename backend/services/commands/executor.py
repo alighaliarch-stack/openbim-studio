@@ -32,9 +32,9 @@ from services.llm.models import Command
 class CommandExecutionResult:
     edit: ValidatedPropertyEdit
     entity: IfcEntity
-    # False when the property was saved but the GeometryRef url is unchanged,
-    # i.e. regeneration failed -- the same signal api/properties.py uses for
-    # geometry_warning (existing save semantics are unchanged).
+    # Day-28: set_prop() is atomic and raises PropertyEditRejected when
+    # regeneration fails, so a returned result always has new geometry and
+    # this is always True. Kept for compatibility.
     geometry_regenerated: bool
 
 
@@ -45,6 +45,8 @@ def execute_command(command: Command | Mapping[str, Any], store: EntityStore) ->
 
     Raises:
         CommandRejected: if validation fails; nothing is changed.
+        PropertyEditRejected: (services.ifc.entity_store) if regeneration
+            or persistence fails; nothing is changed (Day-28 atomic edits).
     """
     edit = validate_command(command, store)
 

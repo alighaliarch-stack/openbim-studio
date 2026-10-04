@@ -43,6 +43,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from services.ifc.entity_store import EntityNotFoundError, EntityStore
+from services.ifc.geometry_inputs import MAX_DIMENSION_MM as _MAX_DIMENSION_MM
 from services.ifc.models import IfcType
 from services.llm.models import Command, CommandType
 
@@ -57,8 +58,9 @@ EDITABLE_PROPERTIES: dict[IfcType, dict[str, frozenset[str]]] = {
 UNIT_TO_MM: dict[str, Decimal] = {"mm": Decimal(1), "m": Decimal(1000)}
 
 # Upper bound on a normalised dimension (100 m), so an absurd value can't
-# reach OpenSCAD.
-MAX_DIMENSION_MM = Decimal(100_000)
+# reach OpenSCAD. Day-28: shared with EntityStore.set_prop(), which applies
+# the same bound to every wall dimension edit (services/ifc/geometry_inputs.py).
+MAX_DIMENSION_MM = Decimal(_MAX_DIMENSION_MM)
 
 
 class RejectionReason(str, Enum):

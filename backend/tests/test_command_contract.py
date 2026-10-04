@@ -318,17 +318,21 @@ class ExecutionTest(_TempModelTestCase):
         self.assertEqual(positions, sorted(positions), chain[:10])
         self.assertFalse(any(name in {"scad.py", "properties.py"} for name, _ in chain), "no API route in the path")
 
-    def test_regeneration_failure_is_reported_not_hidden(self) -> None:
-        # Existing semantics (Day 20/24): property saved, previous geometry kept.
+    def test_regeneration_failure_rejects_and_changes_nothing(self) -> None:
+        # Day-28 atomic edits (replaces Day 27's save-then-report semantics):
+        # a failed regeneration rejects the command and leaves the model as is.
+        from services.ifc.entity_store import EditRejectionReason, PropertyEditRejected
         from services.openscad.engine import OpenSCADEngine
         from services.openscad.models import RenderResult, RenderStatus
 
-        url_before = self.store.get_entity(WALL).geometry.url
+        wall_before = self.store.get_entity(WALL).model_dump(mode="json")
+        disk_before = self.model_path.read_bytes()
         with mock.patch.object(OpenSCADEngine, "render", return_value=RenderResult(status=RenderStatus.FAILED, error="forced")):
-            result = execute_command(edit("Height", 2.9, "m"), self.store)
-        self.assertFalse(result.geometry_regenerated)
-        self.assertEqual(result.entity.psets[QTO]["Height"], 2900)
-        self.assertEqual(result.entity.geometry.url, url_before)
+            with self.assertRaises(PropertyEditRejected) as caught:
+                execute_command(edit("Height", 2.9, "m"), self.store)
+        self.assertEqual(caught.exception.reason, EditRejectionReason.GEOMETRY_REGENERATION_FAILED)
+        self.assertEqual(self.store.get_entity(WALL).model_dump(mode="json"), wall_before)
+        self.assertEqual(self.model_path.read_bytes(), disk_before)
 
 
 if __name__ == "__main__":
