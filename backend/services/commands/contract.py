@@ -73,6 +73,16 @@ class RejectionReason(str, Enum):
     INVALID_VALUE = "invalid_value"
     UNSUPPORTED_UNIT = "unsupported_unit"
     VALUE_OUT_OF_RANGE = "value_out_of_range"
+    # Day-30 numeric/unit provenance (services/commands/provenance.py).
+    NO_EXPLICIT_QUANTITY = "no_explicit_quantity"
+    AMBIGUOUS_QUANTITY = "ambiguous_quantity"
+    RELATIVE_CHANGE_UNSUPPORTED = "relative_change_unsupported"
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    # Day-30 hardening: property and target provenance (same module).
+    NO_EXPLICIT_PROPERTY = "no_explicit_property"
+    AMBIGUOUS_PROPERTY = "ambiguous_property"
+    PROPERTY_MISMATCH = "property_mismatch"
+    TARGET_MISMATCH = "target_mismatch"
 
 
 class CommandRejected(ValueError):

@@ -77,10 +77,17 @@ async def lifespan(app: FastAPI):
 
     # --- M09 AI Chat Module ---
     context_builder = ContextBuilder(entity_store, settings.llm_context_token_limit)
-    api_key = settings.anthropic_api_key if settings.llm_provider == "anthropic" else settings.openai_api_key
-    llm_client = LLMClient(settings.llm_provider, api_key)
+    api_keys = {"anthropic": settings.anthropic_api_key, "openai": settings.openai_api_key}
+    llm_client = LLMClient(
+        settings.llm_provider,
+        api_keys.get(settings.llm_provider),  # Day-29: none for "ollama"
+        base_url=settings.ollama_base_url,
+        model=settings.ollama_model,
+        timeout_seconds=settings.ollama_timeout_seconds,
+        num_ctx=settings.ollama_num_ctx,
+    )
     output_parser = OutputParser()
-    ai_chat_service = AIChatService(context_builder, llm_client, output_parser)
+    ai_chat_service = AIChatService(context_builder, llm_client, output_parser, entity_store)
 
     app.state.entity_store = entity_store
     app.state.openscad_engine = openscad_engine

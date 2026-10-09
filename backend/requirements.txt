@@ -10,4 +10,5 @@ ifcopenshell>=0.7.0  # TODO(Phase 2): wire into M11 IFC Export (out of MVP scope
 langchain>=0.1        # TODO: wire real provider call in services/llm/llm_client.py
 anthropic>=0.25        # Claude API client (primary LLM provider)
 openai>=1.10           # Alternate LLM provider
+httpx>=0.25            # Day-29: Ollama HTTP API client (already installed via anthropic/openai)
 python-dotenv>=1.0

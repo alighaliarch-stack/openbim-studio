@@ -52,6 +52,17 @@ class Settings:
     openai_api_key: str | None = field(default_factory=lambda: os.getenv("OPENAI_API_KEY"))
     llm_context_token_limit: int = 32_000  # FR-065: Context must fit LLM token limit (32k for MVP)
 
+    # Day-29: local Ollama provider (LLM_PROVIDER=ollama), reached over its
+    # HTTP API only; needs no API key. OLLAMA_MODEL can name any installed
+    # model (e.g. gemma3:4b) without code changes.
+    ollama_base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"))
+    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2:3b"))
+    # Generous: the first call after idle includes loading the model.
+    ollama_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")))
+    # Explicit context window; Ollama's default is smaller and silently
+    # truncates longer prompts.
+    ollama_num_ctx: int = 8192
+
     # --- CORS (frontend dev server) ---
     cors_allow_origins: tuple[str, ...] = ("http://localhost:5173",)
 
