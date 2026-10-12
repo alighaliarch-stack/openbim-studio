@@ -14,18 +14,26 @@ by the existing deterministic chain:
 This module deliberately imports nothing from services.openscad or
 services.geometry and never calls /api/scad/render, so it cannot become a
 second geometry path.
+
+Day-31: execute_ai_proposal() is the only way an AI-originated proposal
+is executed. It re-runs every AI check (ai_edit.validate_ai_edit) against
+the current model and selection, then calls execute_command() once.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from services.commands import ai_edit
 from services.commands.contract import ValidatedPropertyEdit, validate_command
 from services.ifc.entity_store import EntityStore
 from services.ifc.models import IfcEntity
 from services.llm.models import Command
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -61,3 +69,31 @@ def execute_command(command: Command | Mapping[str, Any], store: EntityStore) ->
         entity=entity,
         geometry_regenerated=url_after is not None and url_after != url_before,
     )
+
+
+def execute_ai_proposal(
+    proposal: ai_edit.PendingProposal, selected_guid: str | None, store: EntityStore
+) -> CommandExecutionResult:
+    """
+    Day-31: execute a user-confirmed AI proposal.
+
+    `selected_guid` is the selection at confirmation time. Every AI check
+    runs again first, so a proposal whose wall was deselected, deleted or
+    changed type since it was proposed is rejected, not executed; so is one
+    whose target property changed meanwhile (stale_proposal).
+
+    Raises:
+        CommandRejected: if any check fails; nothing is changed.
+        PropertyEditRejected: if regeneration or persistence fails;
+            nothing is changed (Day-28 atomic edits).
+    """
+    edit = ai_edit.validate_ai_edit(proposal.command, store, proposal.request_text, selected_guid)
+    ai_edit.verify_unchanged(proposal, edit, store)
+    result = execute_command(proposal.command, store)
+    # Audit record, only once the atomic edit has committed. No prompt text.
+    logger.info(
+        "AI property edit applied: proposal=%s target=%s property=%s.%s value=%s mm geometry=%s",
+        proposal.proposal_id, result.edit.target_guid, result.edit.pset, result.edit.property,
+        result.edit.value_mm, result.entity.geometry.url if result.entity.geometry else None,
+    )
+    return result

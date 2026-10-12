@@ -82,6 +82,25 @@ class AIPromptRequest(BaseModel):
     selected_guid: str | None = None
 
 
+class AIConfirmRequest(BaseModel):
+    """POST /api/ai/confirm request body (Day-31).
+
+    Only a proposal id and the current selection: the command and value
+    are the ones the server validated and stored, never supplied here.
+    """
+
+    proposal_id: str
+    selected_guid: str | None = None
+
+
+class AIConfirmResponse(BaseModel):
+    """POST /api/ai/confirm response body: the edit was applied."""
+
+    success: bool
+    text: str
+    entity: IfcEntity
+
+
 class ErrorResponse(BaseModel):
     """Standard error envelope (SDS 9.3)."""
 
@@ -94,6 +113,8 @@ class ErrorResponse(BaseModel):
 
 # Re-exported for convenience so route modules can `from api.schemas import AIResponse`.
 __all__ = [
+    "AIConfirmRequest",
+    "AIConfirmResponse",
     "AIPromptRequest",
     "AIResponse",
     "ErrorResponse",

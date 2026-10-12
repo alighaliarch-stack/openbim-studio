@@ -86,7 +86,7 @@ function isStructuredError(body: unknown): boolean {
  *     genuine server-side failure
  *   - 4xx -> the backend's own error text, when it sent any
  */
-async function describeSaveFailure(err: unknown): Promise<string> {
+export async function describeSaveFailure(err: unknown): Promise<string> {
   if (!(err instanceof ApiError)) return UNREACHABLE_MESSAGE;
 
   if (err.status >= 500 && isStructuredError(err.detail)) {

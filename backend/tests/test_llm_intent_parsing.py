@@ -354,9 +354,16 @@ class ProposalOnlyInvariantTest(_ProposalTestCase):
 
     def test_ai_modules_cannot_reach_execution_or_geometry(self) -> None:
         forbidden_imports = ("services.commands.executor", "services.openscad", "services.geometry", "api")
-        forbidden_names = {"execute_command", "set_prop", "executor", "render"}
-        for name in ("chat_service.py", "llm_client.py", "output_parser.py", "context_builder.py"):
-            tree = ast.parse((BACKEND_ROOT / "services" / "llm" / name).read_text(encoding="utf-8"))
+        # Day-31: also the AI executor entry point and the model-mutating
+        # EntityStore / persistence methods.
+        forbidden_names = {"execute_command", "execute_ai_proposal", "set_prop", "add_entity", "save",
+                           "executor", "render"}
+        # Day-31: ai_edit.py is the proposal-validation module chat_service imports.
+        modules = [Path("services", "llm", n) for n in
+                   ("chat_service.py", "llm_client.py", "output_parser.py", "context_builder.py")]
+        for module_path in modules + [Path("services", "commands", "ai_edit.py")]:
+            name = module_path.as_posix()
+            tree = ast.parse((BACKEND_ROOT / module_path).read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 modules = [a.name for a in node.names] if isinstance(node, ast.Import) else (
                     [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
@@ -398,12 +405,18 @@ class RouteTest(_ProposalTestCase):
 
     async def test_route_returns_only_edit_property_proposals(self) -> None:
         stub = replying(llm_reply({"type": "EditProperty", "params": edit_params("Length", 4, "m")}))
+        # Day-31: an AI edit needs the target wall to be selected, so the
+        # request now sends the selection (as AIChatPanel does).
         with mock.patch.object(EntityStore, "set_prop") as set_prop:
-            response = self.client_for(stub).post("/api/ai/prompt", json={"prompt": "Make the wall 4 metres long"})
+            client = self.client_for(stub)
+            response = client.post("/api/ai/prompt", json={"prompt": "Make the wall 4 metres long", "selected_guid": WALL})
+            unselected = client.post("/api/ai/prompt", json={"prompt": "Make the wall 4 metres long"})
         body = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual([c["type"] for c in body["commands"]], ["EditProperty"])
         self.assertEqual(body["commands"][0]["params"], edit_params("Length", 4000, "mm"))
+        self.assertEqual((unselected.status_code, unselected.json()["commands"]), (200, []))
+        self.assertIn("no_selection", unselected.json()["text"])
         set_prop.assert_not_called()
         self.assert_model_unchanged()
 

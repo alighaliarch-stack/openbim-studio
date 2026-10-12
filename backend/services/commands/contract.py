@@ -83,6 +83,10 @@ class RejectionReason(str, Enum):
     AMBIGUOUS_PROPERTY = "ambiguous_property"
     PROPERTY_MISMATCH = "property_mismatch"
     TARGET_MISMATCH = "target_mismatch"
+    # Day-31 MVP target policy: every AI edit needs a selected target wall.
+    NO_SELECTION = "no_selection"
+    # Day-31: the target property changed after the proposal was made.
+    STALE_PROPOSAL = "stale_proposal"
 
 
 class CommandRejected(ValueError):

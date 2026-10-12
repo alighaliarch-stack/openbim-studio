@@ -57,6 +57,18 @@ export interface AIPromptRequest {
   selected_guid: string | null;
 }
 
+/** Day-31: POST /api/ai/confirm — only the proposal id and the current selection. */
+export interface AIConfirmRequest {
+  proposal_id: string;
+  selected_guid: string | null;
+}
+
+export interface AIConfirmResponse {
+  success: boolean;
+  text: string;
+  entity: IfcEntity;
+}
+
 /** Re-exported so callers can `import type { AIResponse } from "@/types/api"`. */
 export type { AIResponse };
 

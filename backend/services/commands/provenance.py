@@ -25,6 +25,11 @@ Day-30 hardening adds two more deterministic checks:
     verify_target()   -- if the user refers to the selected wall, the
                          proposal must target the selected GUID.
 
+Day-31 (AI -> property bridge) adds the MVP target policy:
+    verify_selected_target() -- every AI edit, whatever its wording, must
+                         target the selected GUID; with no selection it is
+                         rejected, never redirected to another wall.
+
 Pure functions: no I/O, no EntityStore access, no execution.
 """
 
@@ -184,4 +189,28 @@ def verify_target(edit: contract.ValidatedPropertyEdit, request_text: str, selec
             contract.RejectionReason.TARGET_MISMATCH,
             f"the request refers to the selected wall ({selected} is selected) but the proposal "
             f"targets '{edit.target_guid}'",
+        )
+
+
+def verify_selected_target(edit: contract.ValidatedPropertyEdit, selected_guid: str | None) -> None:
+    """
+    Day-31 MVP target policy: an AI edit must target the selected wall.
+
+    Unlike verify_target(), this applies to every request ("the wall"
+    included). `selected_guid` is the selection the application sent with
+    the request, never a GUID from the LLM or the prompt text.
+
+    Raises:
+        CommandRejected: NO_SELECTION or TARGET_MISMATCH.
+    """
+    Reason = contract.RejectionReason
+    if not selected_guid:
+        raise contract.CommandRejected(
+            Reason.NO_SELECTION,
+            "no wall is selected; select the wall to edit, then ask again",
+        )
+    if edit.target_guid != selected_guid:
+        raise contract.CommandRejected(
+            Reason.TARGET_MISMATCH,
+            f"the proposal targets '{edit.target_guid}' but the selected wall is '{selected_guid}'",
         )

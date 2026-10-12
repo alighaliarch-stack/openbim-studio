@@ -7,10 +7,11 @@ Orchestrates Flow 2 (SDS Section 8.4):
     ContextBuilder.build(selected_guid)
     -> LLMClient.complete(AIRequest)
     -> OutputParser.parse(raw_text)
-    -> validate_command() for every command (Day-29)
-    -> verify_provenance() against the user's request (Day-30)
-    -> verify_property() / verify_target() (Day-30 hardening)
-    -> AIResponse
+    -> ai_edit.validate_ai_edit() for every command:
+         validate_command() (Day-29), verify_provenance() (Day-30),
+         verify_property() (Day-30 hardening), verify_selected_target()
+         (Day-31), verify_target() (Day-30 hardening)
+    -> AIResponse (accepted proposals registered for confirmation)
 
 Day-29: the result is a PROPOSAL only. Commands are validated against the
 Day-27 contract (services/commands/contract.py) and only accepted
@@ -18,6 +19,11 @@ EditProperty commands are returned, normalised to millimetres; anything
 else is reported in `text` and dropped, so an LLM can never hand the
 frontend a CreateComponent (or any other) command. Nothing here executes
 a command, edits the EntityStore or regenerates geometry.
+
+Day-31: each accepted proposal is also stored in a ProposalRegistry and
+its id returned in `proposal_ids`. Executing it is a separate, explicit
+user confirmation (POST /api/ai/confirm -> executor.execute_ai_proposal);
+this module only hands the stored proposal over via take_proposal().
 """
 
 from __future__ import annotations
@@ -33,8 +39,8 @@ from services.llm.output_parser import OutputParser, OutputParseError
 # Module import, not `from ... import validate_command`: contract.py itself
 # imports services.llm.models, so names are looked up at call time to keep
 # the services.llm <-> services.commands import cycle safe.
+from services.commands import ai_edit as command_ai_edit
 from services.commands import contract as command_contract
-from services.commands import provenance as command_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,12 @@ class AIChatService:
         self._output_parser = output_parser
         # Day-29: read-only use -- validate_command() never mutates the store.
         self._entity_store = entity_store
+        # Day-31: accepted proposals awaiting explicit user confirmation.
+        self._proposals = command_ai_edit.ProposalRegistry()
+
+    def take_proposal(self, proposal_id: str) -> command_ai_edit.PendingProposal | None:
+        """Day-31: remove and return a pending proposal (single use), or None."""
+        return self._proposals.take(proposal_id)
 
     async def send_prompt(self, prompt: str, selected_guid: str | None = None) -> AIResponse:
         """
@@ -106,35 +118,35 @@ class AIChatService:
             )
 
         proposals: list[Command] = []
+        proposal_ids: list[str] = []
         lines: list[str] = []
         for command in parsed.commands:
             try:
-                edit = command_contract.validate_command(command, self._entity_store)
-                # Day-30: the value must be the user's own explicit quantity.
-                command_provenance.verify_provenance(edit, prompt)
-                # Day-30 hardening: the property and (if referred to) the
-                # selected wall must also be the user's own.
-                command_provenance.verify_property(edit, prompt)
-                command_provenance.verify_target(edit, prompt, selected_guid)
+                # Day-27 contract + Day-30 provenance + Day-31 selection policy.
+                edit = command_ai_edit.validate_ai_edit(command, self._entity_store, prompt, selected_guid)
             except command_contract.CommandRejected as exc:
                 logger.info("AI command rejected: %s", exc)
                 lines.append(f"Rejected {command.type.value}: {exc.reason.value} ({exc.detail}).")
                 continue
-            proposals.append(
-                Command(
-                    type=CommandType.EDIT_PROPERTY,
-                    params={
-                        "target_guid": edit.target_guid,
-                        "pset": edit.pset,
-                        "property": edit.property,
-                        "value": edit.value_mm,
-                        "unit": "mm",
-                    },
-                )
+            proposal = Command(
+                type=CommandType.EDIT_PROPERTY,
+                params={
+                    "target_guid": edit.target_guid,
+                    "pset": edit.pset,
+                    "property": edit.property,
+                    "value": edit.value_mm,
+                    "unit": "mm",
+                },
             )
+            proposals.append(proposal)
+            # validate_ai_edit() accepted it, so selected_guid is the target.
+            # The current value is recorded so a later change makes it stale.
+            proposal_ids.append(self._proposals.add(
+                proposal, prompt, edit.target_guid, command_ai_edit.current_value(self._entity_store, edit)
+            ))
             lines.append(
                 f"Proposed (not applied): set {edit.pset}.{edit.property} of "
-                f"'{edit.target_guid}' to {edit.value_mm} mm."
+                f"'{edit.target_guid}' to {edit.value_mm} mm. Confirm to apply it."
             )
 
         if not proposals:
@@ -142,6 +154,7 @@ class AIChatService:
         return AIResponse(
             intent=Intent.EDIT_PROPERTY if proposals else Intent.QUERY,
             commands=proposals,
+            proposal_ids=proposal_ids,
             text="\n".join(lines),
             suggestions=[] if proposals else ["Try e.g. 'Make the selected wall 3.2 m high'"],
         )

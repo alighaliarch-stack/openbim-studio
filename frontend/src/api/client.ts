@@ -10,6 +10,8 @@
  */
 
 import type {
+  AIConfirmRequest,
+  AIConfirmResponse,
   AIPromptRequest,
   AIResponse,
   HealthResponse,
@@ -61,6 +63,11 @@ export class ApiClient {
 
   async sendAiPrompt(body: AIPromptRequest): Promise<AIResponse> {
     return this.request<AIResponse>("POST", "/ai/prompt", body);
+  }
+
+  /** Day-31: apply one AI proposal the user explicitly confirmed. */
+  async confirmAiProposal(body: AIConfirmRequest): Promise<AIConfirmResponse> {
+    return this.request<AIConfirmResponse>("POST", "/ai/confirm", body);
   }
 
   // --------------------------------------------------------------------

@@ -76,3 +76,7 @@ class AIResponse(BaseModel):
     commands: list[Command] = Field(default_factory=list)
     text: str
     suggestions: list[str] = Field(default_factory=list)
+    # Day-31: server-issued id of each proposal in `commands` (same order),
+    # for POST /api/ai/confirm. Always set by AIChatService, never taken
+    # from LLM output.
+    proposal_ids: list[str] = Field(default_factory=list)

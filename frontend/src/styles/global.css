@@ -115,6 +115,33 @@ body,
   background: #f0f0f0;
 }
 
+/* Day-31: AI EditProperty proposal card. */
+.ai-proposal {
+  border-left: 3px solid #b0b0b0;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.ai-proposal--pending,
+.ai-proposal--applying { border-left-color: #d9a400; }
+.ai-proposal--applied { border-left-color: #2e8540; }
+.ai-proposal--failed { border-left-color: #c62828; }
+
+.ai-proposal__status { font-weight: 600; margin-bottom: 4px; }
+
+.ai-proposal__details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0 0 4px;
+}
+
+.ai-proposal__details dt { color: #666; }
+.ai-proposal__details dd { margin: 0; overflow-wrap: anywhere; }
+
+.ai-proposal__actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ai-proposal__hint { color: #666; }
+
 .ai-chat-panel__composer {
   display: flex;
   gap: 8px;
