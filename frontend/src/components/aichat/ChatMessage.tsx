@@ -5,7 +5,8 @@
  *
  * Day-31: a message carrying an EditProperty proposal renders a proposal
  * card (target wall, property, value in mm) whose state is explicit:
- * proposed (not applied) / applying / applied / not applied / dismissed.
+ * proposed (not applied) / applying / applied / not applied / dismissed,
+ * and (Day-32) outcome unknown when the confirmation got no definite answer.
  */
 
 import type { ChatMessage as ChatMessageType, EditProposal } from "@/types/commands";
@@ -41,6 +42,7 @@ const STATUS_LABEL: Record<EditProposal["status"], string> = {
   applying: "Applying…",
   applied: "Applied",
   failed: "Not applied",
+  unknown: "Outcome unknown",
   dismissed: "Dismissed — not applied",
 };
 

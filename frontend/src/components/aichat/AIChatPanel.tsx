@@ -16,11 +16,22 @@
 
 import { useRef, useState } from "react";
 
+import { ApiError } from "@/api/client";
 import { ChatMessage } from "@/components/aichat/ChatMessage";
 import { apiClient, useModelContext } from "@/context/ModelContext";
-import { describeSaveFailure } from "@/hooks/useModel";
+import { describeSaveFailure, isStructuredError } from "@/hooks/useModel";
 import { useSelection } from "@/hooks/useSelection";
 import type { AIResponse, ChatMessage as ChatMessageType, EditProposal } from "@/types/commands";
+
+/**
+ * Day-32: true if the backend definitely did not apply the confirmation: a
+ * 4xx, or a 5xx carrying the backend's own ErrorResponse (502/500 from the
+ * atomic set_prop). A thrown fetch or an unstructured 5xx (e.g. the dev
+ * proxy's 500) is not definite: the edit may have been committed.
+ */
+function isDefiniteRejection(err: unknown): boolean {
+  return err instanceof ApiError && (err.status < 500 || isStructuredError(err.detail));
+}
 
 export function AIChatPanel() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
@@ -32,7 +43,7 @@ export function AIChatPanel() {
   const applyingRef = useRef(false);
 
   const { primaryGuid } = useSelection();
-  const { entities, applyConfirmedEntity } = useModelContext();
+  const { entities, applyConfirmedEntity, refetch } = useModelContext();
 
   async function handleSend() {
     const prompt = draft.trim();
@@ -88,8 +99,21 @@ export function AIChatPanel() {
       applyConfirmedEntity(response.entity.guid, response.entity);
       updateProposal(messageId, { status: "applied", outcome: response.text });
     } catch (err) {
-      // Day-28 atomic edits: a rejected or failed confirmation changed nothing.
-      updateProposal(messageId, { status: "failed", outcome: await describeSaveFailure(err) });
+      const reason = await describeSaveFailure(err);
+      if (isDefiniteRejection(err)) {
+        // Day-28 atomic edits: a rejected or failed confirmation changed nothing.
+        updateProposal(messageId, { status: "failed", outcome: reason });
+      } else {
+        // Day-32: no definite answer (connection lost, or a 5xx that is not the
+        // backend's own ErrorResponse). The backend may have committed the edit
+        // before the response was lost, so claim neither outcome, and reload the
+        // model so the viewport and properties show what the server actually has.
+        updateProposal(messageId, {
+          status: "unknown",
+          outcome: `No confirmation was received from the server, so this change may or may not have been applied. ${reason}`,
+        });
+        await refetch();
+      }
     } finally {
       applyingRef.current = false;
       setApplyingId(null);

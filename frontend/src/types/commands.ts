@@ -23,8 +23,12 @@ export interface AIResponse {
   proposal_ids: string[];
 }
 
-/** Day-31: lifecycle of one AI EditProperty proposal in the chat. */
-export type ProposalStatus = "pending" | "applying" | "applied" | "failed" | "dismissed";
+/**
+ * Day-31: lifecycle of one AI EditProperty proposal in the chat.
+ * Day-32: "unknown" -- the confirmation got no definite answer (e.g. the
+ * connection dropped), so it may or may not have been applied.
+ */
+export type ProposalStatus = "pending" | "applying" | "applied" | "failed" | "unknown" | "dismissed";
 
 export interface EditProposal {
   id: string;

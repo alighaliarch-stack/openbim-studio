@@ -68,7 +68,7 @@ function backendErrorText(body: unknown): string | null {
 }
 
 /** Day-28: true for the backend's own ErrorResponse envelope ({"detail": {"error": "..."}}). */
-function isStructuredError(body: unknown): boolean {
+export function isStructuredError(body: unknown): boolean {
   if (!body || typeof body !== "object" || !("detail" in body)) return false;
   const detail = (body as { detail: unknown }).detail;
   return Boolean(detail) && typeof detail === "object" && typeof (detail as { error?: unknown }).error === "string";
