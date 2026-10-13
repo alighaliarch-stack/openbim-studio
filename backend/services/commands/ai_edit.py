@@ -15,6 +15,8 @@ and selection, immediately before executing:
     verify_selected_target()  Day-31 every AI edit targets the selected wall
                               (before verify_target, so "nothing selected"
                               is reported as no_selection)
+    verify_entity_reference() Day-34 the request names no other element (non-wall
+                              type, or a GUID other than the target)
     verify_target()           Day-30 "the selected wall" means the selected GUID
                               (kept; implied by the Day-31 check)
 
@@ -70,6 +72,7 @@ def validate_ai_edit(
     provenance.verify_provenance(edit, request_text)
     provenance.verify_property(edit, request_text)
     provenance.verify_selected_target(edit, selected_guid)
+    provenance.verify_entity_reference(edit, request_text, [e.guid for e in store.get_all_entities()])
     provenance.verify_target(edit, request_text, selected_guid)
     return edit
 

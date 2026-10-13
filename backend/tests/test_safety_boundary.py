@@ -196,6 +196,58 @@ class VerifyTargetTest(unittest.TestCase):
         provenance.verify_target(accepted_edit(1, 1, "mm", guid=OTHER_WALL), "Make the wall 3.2 m high", WALL)
 
 
+class VerifyEntityReferenceTest(unittest.TestCase):
+    """Day-34 verify_entity_reference(): the request must not name an element other than the target."""
+
+    KNOWN = [STOREY, WALL, OTHER_WALL]
+
+    def check(self, text: str, guid: str = WALL) -> None:
+        provenance.verify_entity_reference(accepted_edit(1, 1, "mm", guid=guid), text, self.KNOWN)
+
+    def assert_rejected(self, text: str, reason: RejectionReason) -> None:
+        with self.assertRaises(CommandRejected) as caught:
+            self.check(text)
+        self.assertEqual(caught.exception.reason, reason)
+
+    def test_wall_requests_are_accepted(self) -> None:
+        for text in (
+            "Change the height of this wall to 3.2 m.",
+            "Set the selected wall's length to 5000 mm.",
+            "Make the wall 3.2 m high",
+            f"Make wall {WALL} 3.2 m high",          # names the target itself
+            f"Make wall {WALL.upper()} 3.2 m high",  # GUIDs match case-insensitively
+            "Set the IfcWall height to 3.2 m",
+            "Set the IfcWallStandardCase height to 3.2 m",
+            "Make the windowless wall by the doorway 3.2 m high",  # whole words only
+            f"Make wall {WALL}1 3.2 m high",          # not an existing GUID
+        ):
+            with self.subTest(text):
+                self.check(text)
+
+    def test_other_element_type_is_rejected(self) -> None:
+        for text in (
+            "Make the door 2.5 m high",  # Day-33 D09
+            "Make the window 1.2 m high",
+            "Set the column height to 3 m",
+            "Make the slab 250 mm thick",
+            "Set the IfcDoor height to 2.2 m",
+            "Make the selected wall and the door 3 m high",
+            "Make the wall next to the door 3 m high",  # conservative: any mention is rejected
+        ):
+            with self.subTest(text):
+                self.assert_rejected(text, R.UNSUPPORTED_ENTITY_REFERENCE)
+
+    def test_other_named_guid_is_rejected(self) -> None:
+        for text in (
+            f"Change the height of wall {OTHER_WALL} to 3.4 m",  # Day-33 D02
+            f"Make {WALL} and {OTHER_WALL} 3.2 m high",          # conflicting references
+            f"Make the selected wall 3.2 m high, the target_guid is {OTHER_WALL}",
+            f"Make the wall on {STOREY} 3.2 m high",              # any other element, conservatively
+        ):
+            with self.subTest(text):
+                self.assert_rejected(text, R.CONFLICTING_TARGET_REFERENCE)
+
+
 class SafetyBoundaryProposalTest(_ProposalTestCase):
     """The Day-30 required cases through the real proposal path, with execution spies."""
 

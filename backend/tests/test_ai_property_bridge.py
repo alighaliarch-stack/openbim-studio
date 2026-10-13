@@ -474,6 +474,48 @@ class AIPropertyBridgeTest(unittest.TestCase):
         self.assertEqual(self.confirm(self.proposal_id()).status_code, 200)
         self.assertEqual(self.store.get_entity(WALL).psets[QTO], {"Length": 4000, "Height": 3200, "Thickness": 200})
 
+    # -- Day-34: target identity (Day-33 evaluation cases D02 and D09) ---------
+
+    def assert_rejected_without_side_effects(self, prompt: str, reply: str, reason: str) -> None:
+        with mock.patch.object(OpenSCADEngine, "render") as render:
+            self.assert_rejected_proposal(self.propose(prompt, reply), reason)
+        render.assert_not_called()
+        self.execute.assert_not_called()
+        self.assert_nothing_changed()  # no set_prop, model file and entities unchanged
+
+    def test_request_naming_another_wall_is_not_redirected_to_the_selected_wall(self) -> None:
+        # D02: the model answers with the SELECTED wall although the user named another one.
+        self.assert_rejected_without_side_effects(
+            f"Change the height of wall {OTHER_WALL} to 3.4 m", edit_reply("Height", 3.4, "m"),
+            "conflicting_target_reference")
+        # Naming both walls is a conflicting reference, not a choice for the model.
+        self.assert_rejected_without_side_effects(
+            f"Make {WALL} and {OTHER_WALL} 3.2 m high", edit_reply("Height", 3.2, "m"),
+            "conflicting_target_reference")
+
+    def test_request_about_a_door_is_not_reinterpreted_as_a_wall_edit(self) -> None:
+        # D09, with a correctly normalised value (the case the Day-33 run was only saved from by a unit error).
+        for reply in (edit_reply("Height", 2.5, "m"), edit_reply("Height", 2500, "mm")):
+            with self.subTest(reply):
+                self.assert_rejected_without_side_effects("Make the door 2.5 m high", reply,
+                                                          "unsupported_entity_reference")
+
+    def test_model_claiming_a_different_target_is_rejected(self) -> None:
+        # The user names no element; the model's own target choice is not trusted.
+        self.assert_rejected_without_side_effects(
+            "Make the wall 3.2 m high", edit_reply("Height", 3.2, "m", OTHER_WALL), "target_mismatch")
+
+    def test_legitimate_selected_wall_requests_still_execute(self) -> None:
+        for prompt, reply, prop, value_mm in [
+            ("Change the height of this wall to 3.2 m.", edit_reply("Height", 3.2, "m"), "Height", 3200),
+            ("Set the selected wall's length to 5000 mm.", edit_reply("Length", 5000, "mm"), "Length", 5000),
+            (f"Make wall {WALL} 250 mm thick", edit_reply("Thickness", 250, "mm"), "Thickness", 250),
+        ]:
+            with self.subTest(prompt):
+                response = self.confirm(self.proposal_id(prompt, reply))
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(self.store.get_entity(WALL).psets[QTO][prop], value_mm)
+
 
 class ProposalRegistryTest(unittest.TestCase):
     """The pending-proposal store is single-use, bounded and time-limited (no OpenSCAD needed)."""

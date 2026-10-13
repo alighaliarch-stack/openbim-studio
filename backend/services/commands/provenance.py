@@ -30,6 +30,11 @@ Day-31 (AI -> property bridge) adds the MVP target policy:
                          target the selected GUID; with no selection it is
                          rejected, never redirected to another wall.
 
+Day-34 (target identity) adds:
+    verify_entity_reference() -- a request that names a non-wall element
+                         type or a GUID other than the target is rejected,
+                         so the selected wall never stands in for it.
+
 Pure functions: no I/O, no EntityStore access, no execution.
 """
 
@@ -73,6 +78,15 @@ _PROPERTY_WORDS: dict[str, re.Pattern[str]] = {
 
 # Wording that refers to the wall currently selected in the viewer.
 _SELECTION_REFERENCE = re.compile(r"\b(?:selected|selection|this wall)\b", re.IGNORECASE)
+
+# Day-34: element types the user can name that are not walls (whole words,
+# or any IFC class name other than IfcWall/IfcWallStandardCase). The MVP
+# edits walls only, so a request naming one is about a different element.
+_OTHER_ELEMENT_TYPE = re.compile(
+    r"\b(?:doors?|windows?|columns?|slabs?|beams?|roofs?|stairs?|staircases?|ceilings?|railings?|"
+    r"Ifc(?!Wall(?:StandardCase)?\b)[a-z]+)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -213,4 +227,41 @@ def verify_selected_target(edit: contract.ValidatedPropertyEdit, selected_guid: 
         raise contract.CommandRejected(
             Reason.TARGET_MISMATCH,
             f"the proposal targets '{edit.target_guid}' but the selected wall is '{selected_guid}'",
+        )
+
+
+def verify_entity_reference(
+    edit: contract.ValidatedPropertyEdit, request_text: str, known_guids: list[str]
+) -> None:
+    """
+    Day-34: check that the request does not name an element other than the target.
+
+    verify_selected_target() compares only the LLM's target with the
+    selection, so a model that silently replaces the element the user named
+    with the selected wall would pass it. This reads the user's own words:
+    a request naming a non-wall element type ("the door", "IfcWindow"), or
+    an existing GUID other than the target, is rejected, never redirected.
+    Conservative: any such mention is rejected, even as a location ("the
+    wall next to the door"). Names (e.g. "South Wall") are not matched.
+
+    Raises:
+        CommandRejected: UNSUPPORTED_ENTITY_REFERENCE or CONFLICTING_TARGET_REFERENCE.
+    """
+    Reason = contract.RejectionReason
+    other_type = _OTHER_ELEMENT_TYPE.search(request_text)
+    if other_type:
+        raise contract.CommandRejected(
+            Reason.UNSUPPORTED_ENTITY_REFERENCE,
+            f"the request refers to '{other_type.group(0)}', but only the selected wall can be edited",
+        )
+    others = sorted(
+        guid for guid in known_guids
+        if guid != edit.target_guid
+        and re.search(rf"(?<![\w-]){re.escape(guid)}(?![\w-])", request_text, re.IGNORECASE)
+    )
+    if others:
+        raise contract.CommandRejected(
+            Reason.CONFLICTING_TARGET_REFERENCE,
+            f"the request names {', '.join(repr(g) for g in others)} but the proposal targets "
+            f"'{edit.target_guid}'; select the element you mean, then ask again",
         )

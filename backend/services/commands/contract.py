@@ -87,6 +87,9 @@ class RejectionReason(str, Enum):
     NO_SELECTION = "no_selection"
     # Day-31: the target property changed after the proposal was made.
     STALE_PROPOSAL = "stale_proposal"
+    # Day-34: the request names an element other than the target wall.
+    UNSUPPORTED_ENTITY_REFERENCE = "unsupported_entity_reference"
+    CONFLICTING_TARGET_REFERENCE = "conflicting_target_reference"
 
 
 class CommandRejected(ValueError):
