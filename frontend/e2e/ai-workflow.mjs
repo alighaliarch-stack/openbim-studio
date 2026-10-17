@@ -219,8 +219,9 @@ const UI_STATE = `(() => {
       hint: text(c, ".ai-proposal__hint") };
   });
   const messages = [...document.querySelectorAll(".chat-message__text")].map((e) => e.textContent);
+  const rejections = [...document.querySelectorAll(".chat-message[data-rejections]")].map((e) => e.dataset.rejections);
   const selectedRows = [...document.querySelectorAll(".model-tree__row--selected .model-tree__name")].map((e) => e.textContent.trim());
-  return { cards, messages, thinking: Boolean(document.querySelector(".ai-chat-panel__thinking")),
+  return { cards, messages, rejections, thinking: Boolean(document.querySelector(".ai-chat-panel__thinking")),
     composerDisabled: document.querySelector(".ai-chat-panel__composer input")?.disabled ?? null,
     treeSelected: selectedRows, panelName: document.querySelector(".property-panel__name")?.textContent?.trim() ?? null };
 })()`;
@@ -405,6 +406,7 @@ async function main() {
       await sleep(100);
       const settled = await ui();
       return { text: settled.messages.slice(before.messages.length + 1).join("\n"),
+        rejections: settled.rejections.slice(before.rejections.length).join(" ").split(" ").filter(Boolean),
         newCards: settled.cards.slice(before.cards.length), firstCard: before.cards.length, llmCalled: llmCalls - callsBefore };
     };
     const applyButton = (i) => `document.querySelectorAll(".ai-proposal")[${i}]?.querySelector(".ai-proposal__actions button")`;
@@ -506,7 +508,11 @@ async function main() {
       currentUrl = newUrl;
     };
 
-    /** A request the boundary must reject: no card, reason in text, nothing changed anywhere. */
+    /**
+     * A request the boundary must reject: no card, nothing changed anywhere.
+     * Day-40: the reply shows a user-facing message, not the raw reason code
+     * or "Rejected ..." line; the code is on the message's data-rejections.
+     */
     const rejected = async (tag, desc, prompt, reply, reason) => {
       const diskBefore = fs.readFileSync(modelPath);
       const stlBefore = stlFiles();
@@ -516,15 +522,19 @@ async function main() {
       await sleep(150);
       const sw = await serverWall();
       check(tag, `${desc} -> rejected (${reason}); no card, nothing changed`,
-        res.newCards.length === 0 && res.text.includes(`: ${reason} (`) && /No change was proposed/.test(res.text)
+        res.newCards.length === 0 && res.rejections.includes(reason) && !res.text.includes(reason)
+          && !/Rejected \w+:/.test(res.text) && /No change was proposed/.test(res.text)
           && fs.readFileSync(modelPath).equals(diskBefore) && JSON.stringify(stlFiles()) === JSON.stringify(stlBefore)
           && JSON.stringify(sw.psets[QTO]) === JSON.stringify(expected) && sw.geometry.url === currentUrl
           && !reqsSince(n0).some(([, q]) => q.url.endsWith("/api/ai/confirm") || q.url.includes("/scad/"))
           && (await probe()).uuid === meshBefore.uuid,
-        res.text.replace(/\n/g, " | "));
+        `[${res.rejections}] ${res.text.replace(/\n/g, " | ")}`);
     };
 
     // ── A/B. Successful edits through the real UI ──
+    const placeholder = await evaluate(`document.querySelector(".ai-chat-panel__composer input")?.placeholder ?? null`);
+    check("P0", "AI input example is a millimetre request (Day 40)",
+      placeholder === 'e.g. "Make the selected wall 2800 mm high"', placeholder);
     await selectInTree(WALL_A_NAME);
     check("A0", "Wall A selected via the Model Tree; highlighted in the viewport",
       (await probe()).highlight === "selected" && (await probe()).color === SELECTED_HEX);

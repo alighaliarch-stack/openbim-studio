@@ -17,6 +17,7 @@
 import { useRef, useState } from "react";
 
 import { ApiError } from "@/api/client";
+import { AI_EXAMPLE_PROMPT, describeAiReply } from "@/components/aichat/aiMessages";
 import { ChatMessage } from "@/components/aichat/ChatMessage";
 import { apiClient, useModelContext } from "@/context/ModelContext";
 import { describeSaveFailure, isStructuredError } from "@/hooks/useModel";
@@ -55,7 +56,9 @@ export function AIChatPanel() {
 
     try {
       const response = await apiClient.sendAiPrompt({ prompt, selected_guid: primaryGuid });
-      appendMessage({ role: "assistant", text: response.text });
+      // Day-40: rejection codes become user-facing messages (display only).
+      const reply = describeAiReply(response.text);
+      appendMessage({ role: "assistant", text: reply.text, rejections: reply.rejections });
       for (const proposal of toProposals(response)) {
         appendMessage({ role: "assistant", text: "", proposal });
       }
@@ -160,7 +163,7 @@ export function AIChatPanel() {
       >
         <input
           type="text"
-          placeholder='e.g. "Make the selected wall 3.2 m high"'
+          placeholder={`e.g. "${AI_EXAMPLE_PROMPT}"`}
           value={draft}
           disabled={busy}
           onChange={(event) => setDraft(event.target.value)}

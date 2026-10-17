@@ -22,7 +22,10 @@ interface ChatMessageProps {
 export function ChatMessage({ message, selectedGuid, applyDisabled, onApply, onDismiss }: ChatMessageProps) {
   const { proposal } = message;
   return (
-    <div className={`chat-message chat-message--${message.role}`}>
+    <div
+      className={`chat-message chat-message--${message.role}`}
+      data-rejections={message.rejections?.length ? message.rejections.join(" ") : undefined}
+    >
       {message.text && <span className="chat-message__text">{message.text}</span>}
       {proposal && (
         <ProposalCard

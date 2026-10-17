@@ -50,4 +50,6 @@ export interface ChatMessage {
   timestamp: string;
   /** Day-31: set when this message is an EditProperty proposal awaiting confirmation. */
   proposal?: EditProposal;
+  /** Day-40: backend rejection codes behind this reply's user-facing text (for tests/debugging). */
+  rejections?: string[];
 }
