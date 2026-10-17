@@ -145,3 +145,13 @@ They are **not research experiments**. They give no measured evidence of geometr
 - The browser 502 scenario (N2) is an injected response; no browser test observes a real OpenSCAD failure end to end.
 - `ARCHITECTURE.md` and `README.md` still describe the pre-Day-20 flow (audit finding; not changed here).
 - The `/api/scad/render` bypass is unchanged (Day 30 safety boundary).
+
+## Subsequent updates (2026-10-17)
+
+*Added during the Day 51 documentation update. Everything above is left as originally recorded.*
+
+- **Status.** The "awaiting review (not committed)" status above is out of date. Day 28 was committed on 2026-10-04 as:
+  - `cf4d49c` "Day 28: Make property edits atomic" (code and tests);
+  - `3f36c15` "Day 28: Document atomic property-edit checkpoint" (this document).
+- **Published.** The local remote-tracking reflog records the push of `3f36c15` to `origin/main` on 2026-10-06. On 2026-10-17 both commits are ancestors of `origin/main` (`8561338`).
+- **Deferred items seen again later.** The generic 502 detail (OpenSCAD's failure reason not logged) and the missing STL cleanup were observed again on Days 38, 42 and 49 and are still open; see `Steps/Day-42-geometry-validation.md` and `Steps/Day-49-50-mvp-audit-and-checkpoint.md`.

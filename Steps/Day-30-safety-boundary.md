@@ -194,3 +194,11 @@ No code added on Day 30 calls `execute_command()`, `EntityStore.set_prop()`, `/a
 - `backend/tests/test_safety_boundary.py` (new)
 - `backend/tests/test_llm_intent_parsing.py` (one fixture prompt, see §8)
 - `Steps/Day-30-safety-boundary.md` (new)
+
+## Subsequent updates (2026-10-17)
+
+*Added during the Day 51 documentation update. Everything above is left as originally recorded.*
+
+- **Status.** The "awaiting review (not committed)" status above is out of date. Day 30 was committed together with Day 29 on 2026-10-09 as `5f1cf24` (code and tests) and `49f9718` (documents). The local remote-tracking reflog records the push of `49f9718` to `origin/main` on 2026-10-09. On 2026-10-17 both commits are ancestors of `origin/main` (`8561338`).
+- **Correction to §5 and §11 (found on Day 36).** §5 says a unit other than mm/m leaves the request "with no explicit quantity", and §11 says thousands separators and other units are "rejected, not interpreted". That holds only when the request contains no other mm/m quantity. When it does, the parser read only part of the request and validation accepted it if the model agreed: "3 200 mm" was read as 200 mm, "3 m 20 cm" as 3 m, and "- 2.5 m", "−2.5 m" and "–2.5 m" as +2.5 m. The Day 37 completeness guard (`764db95`) now rejects these; see `Steps/Day-36-quantity-parser-investigation.md` and `Steps/Day-37-quantity-completeness-guard.md`.
+- **Later additions to the provenance checks:** `verify_selected_target()` (Day 31), `verify_entity_reference()` (Day 34, `fc1fa7b`) and `unaccounted_quantity_material()` (Day 37, `764db95`). The checks described above are unchanged.

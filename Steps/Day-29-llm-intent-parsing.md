@@ -148,3 +148,13 @@ RECOMMENDATION (needs approval): a small deterministic **grounding check** in `A
 - **`/api/scad/render` and the frontend `AIChatPanel` `CreateComponent` branch are still present and unchanged.** The note above that says "(Day 30 safety boundary)" anticipated Day 30 changing them, but Day 30 did not modify either. What Day 29–30 ensure is that the AI proposal path (`POST /api/ai/prompt`) never returns a `CreateComponent` (or any unsupported) command to that branch. Hardening the endpoint itself remains a separate, later task.
 - **"Unchanged: `services/commands/`" referred to the Day-29 change set alone.** Day 30 then changed that package: it added `provenance.py`, added rejection reasons to `contract.py` and exports to `__init__.py`. Day 30 also changed one fixture prompt in `backend/tests/test_llm_intent_parsing.py` (see Day-30 §8).
 - **The Day-29 test results above (47 tests) are as originally recorded.** They were not re-run as a separate Day-29 state. With Day 30 applied, the full backend suite is 66 tests, all passing (2026-10-09).
+
+## Subsequent updates (2026-10-17)
+
+*Added during the Day 51 documentation update. Everything above, including the 2026-10-09 notes, is left as originally recorded.*
+
+- **Status.** The "awaiting review (not committed)" status at the top, and the 2026-10-09 note that Day 29 was "still uncommitted", are out of date. Days 29 and 30 were committed together on 2026-10-09 as:
+  - `5f1cf24` "Day 29-30: Add validated local LLM proposal safety" (code and tests);
+  - `49f9718` "Day 29-30: Document LLM safety checkpoint" (this document and `Steps/Day-30-safety-boundary.md`).
+- **Published.** The local remote-tracking reflog records the push of `49f9718` to `origin/main` on 2026-10-09. On 2026-10-17 both commits are ancestors of `origin/main` (`8561338`).
+- **The unit/value inconsistency is still unresolved in the model, and still contained by validation.** It was measured live on Day 33 (`llama3.2:3b`: 3 of 13 valid requests falsely rejected, in both repeats) and on Day 35. A repair ("B2") was evaluated on Days 35–38 but **has not been implemented**; see `Steps/Day-33-live-prompt-evaluation.md` and `Steps/Day-35-unit-provenance-evaluation.md`.

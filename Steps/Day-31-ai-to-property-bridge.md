@@ -320,3 +320,12 @@ Docs:
 - `Steps/Day-31-ai-to-property-bridge.md` (new)
 
 Not changed: `EntityStore`, `set_prop`, geometry/OpenSCAD pipeline, `POST /api/properties`, `/api/scad/render`, `main.py`, `backend/data/model.json`.
+
+## Subsequent updates (2026-10-17)
+
+*Added during the Day 51 documentation update. Everything above is left as originally recorded.*
+
+- **Status.** The "awaiting review (not committed)" status above is out of date. Day 31, including the §7 corrections and this document, was committed on 2026-10-12 as `fdb3b63` "Day 31: Add safe AI property edit confirmation". The local remote-tracking reflog records its push to `origin/main` on 2026-10-12. On 2026-10-17 it is an ancestor of `origin/main` (`8561338`).
+- **The deferred committed AI UI e2e test now exists.** §5 lists "a committed AI UI e2e test" as deferred. Day 32 (`725d259`) added `frontend/e2e/ai-workflow.mjs`: real backend, OpenSCAD, Vite and headless Chrome, with only the language model faked. It exercises the proposal card, Apply, Dismiss, double submission, the selection rule and the browser display of `stale_proposal` (check C7b), which §7.4 recorded as not exercised in the browser. The 600 s expiry is still covered by backend tests only. See `Steps/Day-32-ai-e2e-validation.md`.
+- **One Day 31 frontend behaviour was changed on Day 32.** If the confirm response was lost after the server had committed, the card showed "Not applied". It now shows "Outcome unknown" and reloads the model (`725d259`).
+- **Later additions to `validate_ai_edit()`:** `verify_entity_reference()` (Day 34, `fc1fa7b`); `verify_provenance()` gained the Day 37 completeness check (`764db95`).
