@@ -68,9 +68,23 @@ export class SceneManager {
     this.camera.up.set(0, 0, 1); // Z-up, matching IFC convention
     this.camera.lookAt(0, 0, 0);
 
-    const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-    this.scene.add(light);
-    this.scene.add(new THREE.GridHelper(20000, 20));
+    // Day-41: lights and grid follow the Z-up convention. Three's defaults
+    // assume Y-up: HemisphereLight's sky came from +Y (so the -Y faces the
+    // default camera looks at got only the dark ground colour) and GridHelper
+    // lay in the vertical XZ plane. Intensities are physical units (three
+    // r155+ no longer scales lights by PI).
+    const hemisphere = new THREE.HemisphereLight(0xffffff, 0x888888, 1.5);
+    hemisphere.position.set(0, 0, 1); // sky from +Z
+    this.scene.add(hemisphere);
+    // World-fixed key light from above the default viewpoint, so adjacent
+    // faces of a wall are shaded differently and its edges read clearly.
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2);
+    keyLight.position.set(1, -2, 3);
+    this.scene.add(keyLight);
+
+    const grid = new THREE.GridHelper(20000, 20);
+    grid.rotation.x = Math.PI / 2; // XZ -> XY: the ground plane in a Z-up scene
+    this.scene.add(grid);
   }
 
   /** Attach the renderer to a DOM canvas. Call once, on mount. */
