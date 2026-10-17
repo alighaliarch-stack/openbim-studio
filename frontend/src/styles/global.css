@@ -28,6 +28,10 @@ body,
   flex: 1;
   display: grid;
   grid-template-columns: 280px 1fr 320px;
+  /* Day-39: one row exactly as tall as the space below the toolbar. An
+     implicit auto row grew with the viewport's content (canvas buffer +
+     loading overlay), pushing every panel and the AI composer off-screen. */
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -41,6 +45,9 @@ body,
 .app-shell__viewport {
   position: relative;
   min-width: 0;
+  /* Day-39: keep content below the canvas (the loading overlay) inside the
+     cell, so it cannot enlarge the page or the canvas it is measured from. */
+  overflow: hidden;
 }
 
 .toolbar {
