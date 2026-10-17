@@ -85,15 +85,89 @@ function check(id, description, ok, detail = "") {
 function note(text) { evidence.push(text); console.log(`  · ${text}`); }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Day-44: set in main(); prints diagnostics when a wait times out (best effort, never replaces the error). */
+let onWaitTimeout = null;
 async function waitFor(fn, label, timeoutMs = 30_000, intervalMs = 50) {
-  const deadline = Date.now() + timeoutMs;
+  const started = Date.now();
+  const deadline = started + timeoutMs;
   let last;
   while (Date.now() < deadline) {
     last = await fn();
     if (last) return last;
     await sleep(intervalMs);
   }
+  if (onWaitTimeout) {
+    try { await onWaitTimeout(label, Date.now() - started); }
+    catch (err) { console.log(`DIAG diagnostics failed: ${err?.message ?? err}`); }
+  }
   throw new Error(`timed out waiting for: ${label}`);
+}
+
+/**
+ * Day-44: timeout diagnostics. Prints bounded evidence about geometry requests, the
+ * viewport's meshes (placeholder box vs STL) and load tokens, browser console warnings/
+ * errors, and the Vite and backend log tails. Each source is optional and time-limited;
+ * an unavailable source is reported as such. Read-only: nothing in the app is changed.
+ */
+const DIAG_LIMIT = { requests: 15, console: 15, viteLines: 15, backendLines: 25, lineChars: 300 };
+const clip = (s) => (s.length > DIAG_LIMIT.lineChars ? `${s.slice(0, DIAG_LIMIT.lineChars)} …` : s);
+const within = (promise, ms, what) => {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} gave no answer within ${ms} ms`)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+const DIAG_VIEWPORT = () => `(() => {
+  const out = { href: location.href, readyState: document.readyState, canvas: Boolean(document.querySelector(".viewport__canvas")),
+    loadingOverlay: Boolean(document.querySelector(".viewport__overlay")),
+    panelError: document.querySelector(".property-panel__error")?.textContent ?? null };
+  const sm = ${FIND_SCENE_MANAGER};
+  if (!sm) return { ...out, sceneManager: "not found" };
+  out.meshes = [...sm.meshesByGuid].map(([guid, e]) => ({ guid, geometry: e.mesh.geometry.type,
+    source: e.mesh.geometry.type === "BoxGeometry" ? "placeholder (bounds box)" : "STL", inScene: e.mesh.parent === sm.scene }));
+  out.loadTokens = sm.loadTokensByGuid ? Object.fromEntries(sm.loadTokensByGuid) : "unavailable";
+  out.rendererMounted = Boolean(sm.renderer);
+  return out;
+})()`;
+
+async function printTimeoutDiagnostics(label, elapsedMs, diag, backendLog) {
+  const now = Date.now();
+  const age = (t) => (t === undefined ? "?" : `${((now - t) / 1000).toFixed(1)}s ago`);
+  console.log(`DIAG timeout "${label}" after ${elapsedMs} ms`);
+
+  if (!diag.requests) console.log("DIAG geometry requests: unavailable (browser not started)");
+  else {
+    const geo = [...diag.requests.values()].filter((q) => q.url.includes("/geometry/"));
+    const describe = (q) => `${q.url.replace(/^https?:\/\/[^/]+/, "")} status=${q.status ?? "none"} `
+      + `${q.failed ? `failed=${q.failed}` : q.finished ? "finished" : "PENDING"} sent ${age(q.sentAt)}`
+      + `${q.endedAt ? `, took ${q.endedAt - q.sentAt} ms` : ""}`;
+    const open = geo.filter((q) => !q.finished || q.failed);
+    console.log(`DIAG geometry requests: ${geo.length} total, ${open.filter((q) => !q.failed).length} pending, ${open.filter((q) => q.failed).length} failed`);
+    for (const q of open.slice(-DIAG_LIMIT.requests)) console.log(`DIAG   open: ${describe(q)}`);
+    for (const q of geo.filter((g) => g.finished && !g.failed).slice(-DIAG_LIMIT.requests)) console.log(`DIAG   done: ${describe(q)}`);
+  }
+
+  if (!diag.evaluate) console.log("DIAG viewport: unavailable (browser not started)");
+  else {
+    try {
+      const { meshes, ...page } = (await within(diag.evaluate(DIAG_VIEWPORT()), 5_000, "viewport probe")) ?? {};
+      console.log(`DIAG viewport: ${clip(JSON.stringify(page))}`);
+      for (const m of (meshes ?? []).slice(0, DIAG_LIMIT.requests)) {
+        console.log(`DIAG   mesh ${m.guid}: ${m.geometry} = ${m.source}${m.inScene ? "" : " (NOT in scene)"}`);
+      }
+    } catch (err) { console.log(`DIAG viewport: unavailable (${err?.message ?? err})`); }
+  }
+
+  if (!diag.consoleTail) console.log("DIAG browser console: unavailable (browser not started)");
+  else {
+    console.log(`DIAG browser console warnings/errors (last ${DIAG_LIMIT.console} of ${diag.consoleTail.length}):`);
+    for (const line of diag.consoleTail.slice(-DIAG_LIMIT.console)) console.log(`DIAG   ${clip(line)}`);
+  }
+
+  const tail = (chunks, n) => chunks.join("").split(/\r?\n/).filter((l) => l.trim()).slice(-n);
+  console.log(`DIAG vite log tail:${diag.viteLog.length ? "" : " (empty)"}`);
+  for (const line of tail(diag.viteLog, DIAG_LIMIT.viteLines)) console.log(`DIAG   ${clip(line)}`);
+  console.log(`DIAG backend log tail:${backendLog.length ? "" : " (empty)"}`);
+  for (const line of tail(backendLog, DIAG_LIMIT.backendLines)) console.log(`DIAG   ${clip(line)}`);
 }
 const sha256 = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 const portInUse = (port) => new Promise((resolve) => {
@@ -272,6 +346,9 @@ async function main() {
   await new Promise((r) => llmServer.listen(LLM_PORT, "127.0.0.1", r));
 
   const backendLog = [];
+  // Day-44: sources for timeout diagnostics, filled in as they become available.
+  const diag = { requests: null, evaluate: null, consoleTail: null, viteLog: [] };
+  onWaitTimeout = (label, elapsedMs) => printTimeoutDiagnostics(label, elapsedMs, diag, backendLog);
   async function startBackend(openscadBinary) {
     backend = spawn(PYTHON, ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", String(BACKEND_PORT)], {
       cwd: BACKEND_ROOT,
@@ -321,6 +398,9 @@ async function main() {
     await startBackend(OPENSCAD);
     const vite = spawn(process.execPath, [VITE_BIN, "--port", String(VITE_PORT), "--strictPort", "--host", "127.0.0.1"], { cwd: FRONTEND_ROOT });
     children.push(vite);
+    const keepViteTail = (d) => { diag.viteLog.push(String(d)); if (diag.viteLog.length > 200) diag.viteLog.shift(); };
+    vite.stdout.on("data", keepViteTail);
+    vite.stderr.on("data", keepViteTail);
     const appUrl = `http://127.0.0.1:${VITE_PORT}/`;
     await waitFor(() => httpOk(appUrl), "vite");
     await waitFor(() => httpOk(`${appUrl}api/model`), "vite proxy");
@@ -348,16 +428,30 @@ async function main() {
         appErrors.push(`console.error: ${params.args.map((a) => a.value ?? a.description).join(" ")}`);
       } else if (method === "Network.requestWillBeSent") {
         requests.set(params.requestId, { url: params.request.url, method: params.request.method,
-          postData: params.request.postData ?? null, status: null, finished: false, failed: null, t0: params.timestamp });
+          postData: params.request.postData ?? null, status: null, finished: false, failed: null, t0: params.timestamp,
+          sentAt: Date.now() });
       } else if (method === "Network.responseReceived") {
         const q = requests.get(params.requestId); if (q) q.status = params.response.status;
       } else if (method === "Network.loadingFinished") {
-        const q = requests.get(params.requestId); if (q) { q.finished = true; q.t1 = params.timestamp; }
+        const q = requests.get(params.requestId); if (q) { q.finished = true; q.t1 = params.timestamp; q.endedAt = Date.now(); }
       } else if (method === "Network.loadingFailed") {
-        const q = requests.get(params.requestId); if (q) q.failed = params.errorText;
+        const q = requests.get(params.requestId); if (q) { q.failed = params.errorText; q.endedAt = Date.now(); }
       }
     });
-    for (const d of ["Page", "Runtime", "Network"]) await cdp.send(`${d}.enable`);
+    // Day-44: bounded tail of browser warnings/errors (console, log entries, exceptions) for timeout diagnostics.
+    diag.requests = requests;
+    diag.consoleTail = [];
+    const keepConsole = (line) => { diag.consoleTail.push(line); if (diag.consoleTail.length > 50) diag.consoleTail.shift(); };
+    cdp.on((method, params) => {
+      if (method === "Runtime.consoleAPICalled" && (params.type === "error" || params.type === "warning")) {
+        keepConsole(`console.${params.type}: ${params.args.map((a) => a.value ?? a.description).join(" ")}`);
+      } else if (method === "Log.entryAdded" && (params.entry.level === "error" || params.entry.level === "warning")) {
+        keepConsole(`log.${params.entry.level}: ${params.entry.text} ${params.entry.url ?? ""}`);
+      } else if (method === "Runtime.exceptionThrown") {
+        keepConsole(`exception: ${params.exceptionDetails.exception?.description ?? params.exceptionDetails.text}`);
+      }
+    });
+    for (const d of ["Page", "Runtime", "Network", "Log"]) await cdp.send(`${d}.enable`);
     await cdp.send("Emulation.setDeviceMetricsOverride", { ...VIEW, deviceScaleFactor: 1, mobile: false });
 
     const evaluate = async (expression) => {
@@ -365,6 +459,7 @@ async function main() {
       if (res.exceptionDetails) throw new Error(`evaluate: ${res.exceptionDetails.exception?.description ?? res.exceptionDetails.text}`);
       return res.result.value;
     };
+    diag.evaluate = evaluate;
     const probe = (guid = WALL_A, oldUuid) => evaluate(probeExpr(guid, oldUuid));
     const ui = () => evaluate(UI_STATE);
     const reqsSince = (n) => [...requests.entries()].slice(n);
