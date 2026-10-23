@@ -156,6 +156,9 @@ class RejectedCommandTest(_TempModelTestCase):
         ("14 create wall (CreateWall)", {"type": "CreateWall", "params": {"length": 3000}}, RejectionReason.UNSUPPORTED_COMMAND),
         ("15 move wall", {"type": "MoveComponent", "params": {"target_guid": WALL, "dx": 1000}}, RejectionReason.UNSUPPORTED_COMMAND),
         ("16 rotate wall", {"type": "RotateComponent", "params": {"target_guid": WALL, "angle": 90}}, RejectionReason.UNSUPPORTED_COMMAND),
+        # Day-52C: the viewport Move tool's placement set is not AI-editable.
+        ("move wall via placement X", edit("X", 1000, pset="OpenBIM_Placement"), RejectionReason.UNSUPPORTED_PROPERTY),
+        ("move wall via placement Z", edit("Z", 0, pset="OpenBIM_Placement"), RejectionReason.UNSUPPORTED_PROPERTY),
         ("delete wall", {"type": "DeleteComponent", "params": {"target_guid": WALL}}, RejectionReason.UNSUPPORTED_COMMAND),
         ("UpdateSelection", {"type": "UpdateSelection", "params": {"guids": [WALL]}}, RejectionReason.UNSUPPORTED_COMMAND),
         ("17 direct SCAD render command", {"type": "RenderScad", "params": {"component_type": "wall", "parameters": {"length": 3000}}}, RejectionReason.UNSUPPORTED_COMMAND),

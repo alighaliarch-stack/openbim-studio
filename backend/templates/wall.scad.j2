@@ -1,14 +1,19 @@
 // wall.scad.j2
 // OpenBIM Studio — Component: Wall (M08 OpenSCAD Engine)
-// Params (mm): length, height, thickness
+// Params (mm): length, height, thickness; x, y, z = world position of the
+// min corner (Day-52C OpenBIM_Placement, an MVP convention -- not IFC
+// ObjectPlacement)
 // TODO(Phase 2): openings (doors/windows), material-based coloring
 
 length = {{ length }};
 height = {{ height }};
 thickness = {{ thickness }};
+x = {{ x }};
+y = {{ y }};
+z = {{ z }};
 
 module wall(length, height, thickness) {
     cube([length, thickness, height]);
 }
 
-wall(length, height, thickness);
+translate([x, y, z]) wall(length, height, thickness);

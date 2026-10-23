@@ -23,6 +23,15 @@
  * `primary` from useSelectionContext() and re-renders — and re-running
  * the highlight effect below — whenever they change. No manual
  * subscribe/unsubscribe plumbing is needed here.
+ *
+ * Day-52C Move tool: with Move active and exactly one eligible wall
+ * selected (moveTarget), SceneManager shows an X/Y translation gizmo on
+ * it. A left-drag on the gizmo is not a selection click. A finished
+ * single-axis drag is saved as OpenBIM_Placement.<axis> through the same
+ * useModel().editProperty -> POST /api/properties path as the Properties
+ * panel, so the backend regenerates the STL at the new position (or
+ * rejects the edit atomically and the old mesh is reloaded). The outcome
+ * is reported in the toolbar via ViewportContext.moveStatus.
  */
 
 import { useEffect, useRef } from "react";
@@ -31,10 +40,18 @@ import { MeshLoader } from "@/components/viewport/MeshLoader";
 import { SceneManager } from "@/components/viewport/SceneManager";
 import { useModelContext } from "@/context/ModelContext";
 import { useSelectionContext } from "@/context/SelectionContext";
+import {
+  PLACEMENT_PSET, moveTarget, placementCoordinate, useViewportContext, type MoveAxis,
+} from "@/context/ViewportContext";
+import { useModel } from "@/hooks/useModel";
+import { useSelection } from "@/hooks/useSelection";
 import { resolveSelectAction, type ClickModifiers } from "@/selection/SelectionManager";
 
 /** Max pointer movement (px) between down/up still counted as a click, not a drag. */
 const CLICK_DRAG_THRESHOLD_PX = 5;
+
+const MOVE_HINT = "Drag the red (X) or green (Y) arrow to move the wall.";
+const MOVE_PLANE_REJECTED = "Move one axis at a time: drag the red X or green Y arrow, not the square.";
 
 /** Convert a mouse/pointer event's canvas-relative position to NDC coords for raycasting. */
 function toNdc(event: { clientX: number; clientY: number }, canvas: HTMLCanvasElement): { x: number; y: number } {
@@ -53,6 +70,21 @@ export function Viewport() {
 
   const { entities, isLoading } = useModelContext();
   const { guids, select, deselect, clear, isSelected } = useSelectionContext();
+  const { selectedEntities } = useSelection();
+  const { activeTool, setMoveStatus } = useViewportContext();
+  const { editProperty, isSaving, saveError } = useModel();
+
+  // Day-52C: latest values for the gizmo callbacks, which outlive renders.
+  const entitiesRef = useRef(entities);
+  entitiesRef.current = entities;
+  const editPropertyRef = useRef(editProperty);
+  editPropertyRef.current = editProperty;
+  /** The move being saved, so its outcome can be reported once it settles. */
+  const pendingMoveRef = useRef<{ axis: MoveAxis; value: number } | null>(null);
+
+  const moveGuid = activeTool === "move" ? moveTarget(selectedEntities)?.guid ?? null : null;
+  // No gizmo while a move is saving: the mesh is about to be replaced.
+  const gizmoGuid = isSaving ? null : moveGuid;
 
   // Mount / unmount the Three.js scene exactly once.
   useEffect(() => {
@@ -100,6 +132,45 @@ export function Viewport() {
     }
   }, [entities, guids, isSelected]);
 
+  // Day-52C: attach/detach the Move gizmo. Saving reuses the Properties
+  // panel's edit path (optimistic patch, atomic backend edit, revert +
+  // refetch on failure).
+  useEffect(() => {
+    const sceneManager = sceneManagerRef.current;
+    if (!sceneManager) return;
+    if (!gizmoGuid) {
+      sceneManager.setMoveTarget(null);
+      return;
+    }
+    sceneManager.setMoveTarget(gizmoGuid, {
+      onCommit: (axis, deltaMm) => {
+        const entity = entitiesRef.current[gizmoGuid];
+        const current = entity ? placementCoordinate(entity, axis) : null;
+        if (current === null) return;
+        const value = current + deltaMm;
+        pendingMoveRef.current = { axis, value };
+        setMoveStatus({ kind: "info", text: `Saving move: ${axis} ${deltaMm > 0 ? "+" : ""}${deltaMm} mm…` });
+        void editPropertyRef.current(gizmoGuid, PLACEMENT_PSET, axis, value);
+      },
+      onRejected: () => setMoveStatus({ kind: "error", text: MOVE_PLANE_REJECTED }),
+    });
+  }, [gizmoGuid, setMoveStatus]);
+
+  // Day-52C: hint when Move becomes usable for a wall.
+  useEffect(() => {
+    if (moveGuid) setMoveStatus({ kind: "info", text: MOVE_HINT });
+  }, [moveGuid, setMoveStatus]);
+
+  // Day-52C: report a saved or rejected move once its request settles.
+  useEffect(() => {
+    const pending = pendingMoveRef.current;
+    if (isSaving || !pending) return;
+    pendingMoveRef.current = null;
+    setMoveStatus(saveError
+      ? { kind: "error", text: `Move not saved: ${saveError}` }
+      : { kind: "info", text: `Moved: ${pending.axis} = ${pending.value} mm.` });
+  }, [isSaving, saveError, setMoveStatus]);
+
   /**
    * Raycast at `event`'s position and resolve it into a selection action
    * via the shared resolveSelectAction helper (reused from
@@ -134,6 +205,9 @@ export function Viewport() {
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (event.button !== 0) return; // only track the left button for click-vs-drag
+    // Day-52C: the gizmo's own (native) listener runs first; a press on it
+    // starts a move drag, which must not end as a selection click.
+    if (sceneManagerRef.current?.isMoveDragging()) return;
     pointerDownPosRef.current = { x: event.clientX, y: event.clientY };
   }
 

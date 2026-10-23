@@ -16,13 +16,20 @@
  * placeholder (loadMesh()) kept as the fallback shown while an STL
  * streams in and if it fails to load.
  *
- * TODO(Phase 2): add SelectionGizmo (three-transform-controls).
+ * Day-52C: Move gizmo (three's TransformControls, translate mode, X/Y
+ * arrows only -- Z hidden). It is a preview only: when a single-axis drag
+ * ends, the whole-mm offset is handed to the caller (setMoveTarget's
+ * onCommit), which saves it through the property-edit pipeline; the saved
+ * position then arrives as a regenerated STL like any other edit. Drags
+ * on the XY plane handle are undone (onRejected).
  */
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
+import type { MoveAxis } from "@/context/ViewportContext";
 import type { GeometryBounds } from "@/types/entities";
 
 export type HighlightMode = "selected" | "hover" | "none";
@@ -30,6 +37,13 @@ export type HighlightMode = "selected" | "hover" | "none";
 interface MeshEntry {
   mesh: THREE.Mesh;
   baseColor: THREE.Color;
+}
+
+export interface MoveHandlers {
+  /** A single-axis drag ended with a non-zero offset, in whole millimetres. */
+  onCommit: (axis: MoveAxis, deltaMm: number) => void;
+  /** A drag used the XY plane handle; it was undone. */
+  onRejected: () => void;
 }
 
 export class SceneManager {
@@ -58,6 +72,12 @@ export class SceneManager {
    */
   private readonly loadTokensByGuid = new Map<string, number>();
   private animationFrameId: number | null = null;
+  /** Day-52C: Move gizmo, the guid it should be attached to, and the active drag. */
+  private transformControls: TransformControls | null = null;
+  private moveGuid: string | null = null;
+  private moveHandlers: MoveHandlers | null = null;
+  private dragStart: THREE.Vector3 | null = null;
+  private dragAxis: string | null = null;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -112,6 +132,24 @@ export class SceneManager {
     controls.update();
     this.controls = controls;
 
+    // Day-52C: Move gizmo. Left button only (TransformControls ignores
+    // others), so it never competes with orbit (right) or pan (middle);
+    // orbit is also switched off for the duration of a gizmo drag.
+    const transform = new TransformControls(this.camera, canvas);
+    transform.setMode("translate");
+    transform.setSpace("world");
+    transform.showZ = false;
+    transform.setTranslationSnap(1); // whole millimetres
+    transform.addEventListener("dragging-changed", (event) => {
+      controls.enabled = !event.value;
+    });
+    transform.addEventListener("mouseDown", () => this.handleMoveStart());
+    transform.addEventListener("objectChange", () => this.handleMoveChange());
+    transform.addEventListener("mouseUp", () => this.handleMoveEnd());
+    this.scene.add(transform);
+    this.transformControls = transform;
+    this.syncMoveAttachment();
+
     this.startRenderLoop();
   }
 
@@ -119,6 +157,12 @@ export class SceneManager {
   unmount(): void {
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
+    }
+    if (this.transformControls) {
+      this.transformControls.detach();
+      this.transformControls.dispose();
+      this.scene.remove(this.transformControls);
+      this.transformControls = null;
     }
     this.meshesByGuid.forEach(({ mesh }) => this.disposeMesh(mesh));
     this.meshesByGuid.clear();
@@ -215,6 +259,8 @@ export class SceneManager {
   private setMeshEntry(guid: string, entry: MeshEntry): void {
     const existing = this.meshesByGuid.get(guid);
     if (existing) {
+      // Day-52C: never leave the gizmo on a disposed mesh (cancels a drag).
+      if (this.transformControls?.object === existing.mesh) this.transformControls.detach();
       this.disposeMesh(existing.mesh);
       this.meshesByGuid.delete(guid);
     }
@@ -222,6 +268,7 @@ export class SceneManager {
     this.meshesByGuid.set(guid, entry);
 
     this.applyHighlight(entry, this.highlightByGuid.get(guid) ?? "none");
+    this.syncMoveAttachment();
   }
 
   private bumpLoadToken(guid: string): number {
@@ -314,6 +361,69 @@ export class SceneManager {
   }
 
   /**
+   * Day-52C: show the Move gizmo on `guid`'s mesh (re-attached whenever
+   * that mesh is replaced), or hide it with null. `handlers` receive the
+   * outcome of each drag.
+   */
+  setMoveTarget(guid: string | null, handlers: MoveHandlers | null = null): void {
+    this.moveGuid = guid;
+    this.moveHandlers = guid ? handlers : null;
+    this.syncMoveAttachment();
+  }
+
+  /** Day-52C: true while the Move gizmo is being dragged (so the pointer gesture is not a selection click). */
+  isMoveDragging(): boolean {
+    return this.transformControls?.dragging ?? false;
+  }
+
+  private syncMoveAttachment(): void {
+    const transform = this.transformControls;
+    if (!transform) return;
+    const entry = this.moveGuid ? this.meshesByGuid.get(this.moveGuid) : undefined;
+    if (entry && transform.object !== entry.mesh) {
+      transform.attach(entry.mesh);
+      this.dragStart = null;
+    } else if (!entry && transform.object) {
+      transform.detach();
+      this.dragStart = null;
+    }
+  }
+
+  private handleMoveStart(): void {
+    const object = this.transformControls?.object;
+    this.dragStart = object ? object.position.clone() : null;
+    this.dragAxis = this.transformControls?.axis ?? null;
+  }
+
+  private handleMoveChange(): void {
+    // Only single-axis moves are supported: an XY-plane drag never moves the wall.
+    const object = this.transformControls?.object;
+    if (object && this.dragStart && !isMoveAxis(this.dragAxis)) object.position.copy(this.dragStart);
+  }
+
+  private handleMoveEnd(): void {
+    const object = this.transformControls?.object;
+    const start = this.dragStart;
+    const axis = this.dragAxis;
+    this.dragStart = null;
+    this.dragAxis = null;
+    if (!object || !start) return;
+
+    if (!isMoveAxis(axis)) {
+      object.position.copy(start);
+      this.moveHandlers?.onRejected();
+      return;
+    }
+    const component = axis === "X" ? "x" : "y";
+    const deltaMm = Math.round(object.position[component] - start[component]);
+    // Keep the preview exactly on the committed offset until the saved
+    // geometry replaces this mesh (or a failed save reloads the old one).
+    object.position.copy(start);
+    object.position[component] += deltaMm;
+    if (deltaMm !== 0) this.moveHandlers?.onCommit(axis, deltaMm);
+  }
+
+  /**
    * TODO(Phase 2): applyTransform(guid, matrix) — hook up once
    * SelectionGizmo / M07 Command Interpreter exist to dispatch transform
    * deltas.
@@ -342,4 +452,9 @@ export class SceneManager {
       mesh.material.dispose();
     }
   }
+}
+
+/** Day-52C: the gizmo handles Move accepts (single axes; "XY" is the plane handle). */
+function isMoveAxis(axis: string | null): axis is MoveAxis {
+  return axis === "X" || axis === "Y";
 }

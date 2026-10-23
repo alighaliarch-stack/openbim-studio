@@ -50,7 +50,9 @@ from services.commands import contract  # noqa: E402
 from services.geometry import wall_generator as wall_generator_module  # noqa: E402
 from services.ifc import entity_store as entity_store_module  # noqa: E402
 from services.ifc.entity_store import EntityStore  # noqa: E402
-from services.ifc.geometry_inputs import GEOMETRY_INPUTS, MAX_DIMENSION_MM  # noqa: E402
+from services.ifc.geometry_inputs import (  # noqa: E402
+    GEOMETRY_INPUTS, MAX_COORDINATE_MM, MAX_DIMENSION_MM, PLACEMENT_PSET,
+)
 from services.ifc.models import IfcType, ModelDocument  # noqa: E402
 from services.openscad import engine as engine_module  # noqa: E402
 from services.openscad.cli_executor import CLIExecutor, CLIResult, OpenSCADTimeoutError  # noqa: E402
@@ -202,11 +204,12 @@ class _TransactionTestCase(unittest.TestCase):
 
 
 def _fake_render(_engine, _component_id, params) -> RenderResult:
-    """A successful render without OpenSCAD: new uuid STL url, bounds from the params."""
+    """A successful render without OpenSCAD: new uuid STL url, bounds from the params (Day-52C: incl. placement)."""
+    x, y, z = params.get("x", 0.0), params.get("y", 0.0), params.get("z", 0.0)
     return RenderResult(
         status=RenderStatus.SUCCESS,
         stl_path=str(Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}.stl"),
-        bounds=GeometryBounds(min=(0.0, 0.0, 0.0), max=(params["length"], params["thickness"], params["height"])),
+        bounds=GeometryBounds(min=(x, y, z), max=(x + params["length"], y + params["thickness"], z + params["height"])),
         render_time_ms=1.0,
     )
 
@@ -422,6 +425,130 @@ class AtomicPropertyEditTest(_TransactionTestCase):
         self.assertEqual(contract.MAX_DIMENSION_MM, Decimal(MAX_DIMENSION_MM))
 
 
+class PlacementEditTest(_TransactionTestCase):
+    """Day-52C: OpenBIM_Placement X/Y/Z drive geometry through the same atomic edit (no OpenSCAD needed)."""
+
+    def edit_placement(self, prop: str, value: object, guid: str = WALL):
+        return self.edit(prop, value, guid=guid, pset=PLACEMENT_PSET)
+
+    def assert_world_bounds(self, entity: dict, xyz: tuple, dims: dict) -> None:
+        x, y, z = xyz
+        self.assertEqual(entity["geometry"]["bounds"], {
+            "min": [x, y, z],
+            "max": [x + dims["Length"], y + dims["Thickness"], z + dims["Height"]],
+        })
+
+    def assert_placed_commit(self, prop: str, value, expected_xyz: tuple, dims: dict = SEED) -> dict:
+        previous_url = self.wall_url()
+        response = self.edit_placement(prop, value)
+        self.assertEqual(response.status_code, 200, response.text)
+        entity = response.json()["entity"]
+        self.assertEqual(entity["psets"][PLACEMENT_PSET][prop], value)
+        self.assertNotEqual(entity["geometry"]["url"], previous_url)
+        self.assert_world_bounds(entity, expected_xyz, dims)
+        self.assertEqual(self.store.get_entity(WALL).model_dump(mode="json"), entity)
+        self.assert_consistent()
+        return entity
+
+    def test_placement_edit_regenerates_geometry_at_the_new_position(self) -> None:
+        with mock.patch.object(OpenSCADEngine, "render", autospec=True, side_effect=_fake_render) as render:
+            entity = self.assert_placed_commit("X", 2000, (2000, 0, 0))
+        params = render.call_args.args[2]
+        self.assertEqual((params["x"], params["y"], params["z"]), (2000.0, 0.0, 0.0))
+        self.assertEqual(entity["psets"][PLACEMENT_PSET], {"X": 2000})
+        self.assertEqual(entity["psets"][QTO], SEED)
+
+    def test_zero_negative_and_boundary_coordinates_are_accepted(self) -> None:
+        with mock.patch.object(OpenSCADEngine, "render", _fake_render):
+            self.assert_placed_commit("X", -1500, (-1500, 0, 0))
+            self.assert_placed_commit("Y", 0, (-1500, 0, 0))
+            self.assert_placed_commit("Z", -MAX_COORDINATE_MM, (-1500, 0, -MAX_COORDINATE_MM))
+            self.assert_placed_commit("Y", MAX_COORDINATE_MM, (-1500, MAX_COORDINATE_MM, -MAX_COORDINATE_MM))
+            self.assert_placed_commit("X", 0.5, (0.5, MAX_COORDINATE_MM, -MAX_COORDINATE_MM))
+
+    def test_invalid_coordinates_are_rejected_before_any_change(self) -> None:
+        values = [MAX_COORDINATE_MM + 1, -MAX_COORDINATE_MM - 1, MAX_COORDINATE_MM + 0.5, 10**30, -10**30,
+                  "100", "", "abc", True, False, None, [], {}, [100], {"value": 100}]
+        with mock.patch.object(OpenSCADEngine, "render") as render:
+            for prop in ["X", "Y", "Z"]:
+                for value in values:
+                    with self.subTest(prop=prop, value=value):
+                        before = self.snapshot()
+                        detail = self.assert_rejected(self.edit_placement(prop, value), 422, "validation_failed")
+                        self.assertIn(f"{PLACEMENT_PSET}.{prop}", detail["detail"])
+                        self.assert_unchanged(before)
+                        self.assertNotIn(PLACEMENT_PSET, self.store.get_entity(WALL).psets)
+                for literal in ["NaN", "Infinity", "-Infinity"]:
+                    with self.subTest(prop=prop, literal=literal):
+                        before = self.snapshot()
+                        body = f'{{"pset_name": "{PLACEMENT_PSET}", "property_name": "{prop}", "value": {literal}}}'
+                        self.assert_rejected(self.edit_raw(body), 422, "validation_failed")
+                        self.assert_unchanged(before)
+            render.assert_not_called()
+
+    def test_regeneration_failures_on_a_placement_edit_are_atomic(self) -> None:
+        injections = {
+            "OpenSCAD binary missing (unpatched CLIExecutor)": [],
+            "render returns FAILED": [mock.patch.object(OpenSCADEngine, "render", _failed_render)],
+            "render raises": [mock.patch.object(OpenSCADEngine, "render", side_effect=RuntimeError("forced"))],
+        }
+        for label, patches in injections.items():
+            with self.subTest(label):
+                before = self.snapshot()
+                for patch in patches:
+                    patch.start()
+                try:
+                    response = self.edit_placement("X", 2000)
+                finally:
+                    for patch in reversed(patches):
+                        patch.stop()
+                self.assert_rejected(response, 502, "geometry_regeneration_failed")
+                self.assert_unchanged(before)
+                self.assertEqual(self.wall_url(), SEED_URL)
+                self.assertNotIn(PLACEMENT_PSET, self.store.get_entity(WALL).psets)
+
+    def test_dimension_edit_preserves_the_placement(self) -> None:
+        with mock.patch.object(OpenSCADEngine, "render", autospec=True, side_effect=_fake_render) as render:
+            self.assert_placed_commit("X", 2000, (2000, 0, 0))
+            self.assert_placed_commit("Y", -500, (2000, -500, 0))
+            response = self.edit("Length", 6000)
+        self.assertEqual(response.status_code, 200, response.text)
+        entity = response.json()["entity"]
+        params = render.call_args.args[2]
+        self.assertEqual((params["x"], params["y"], params["z"], params["length"]), (2000.0, -500.0, 0.0, 6000.0))
+        self.assertEqual(entity["psets"][PLACEMENT_PSET], {"X": 2000, "Y": -500})
+        self.assert_world_bounds(entity, (2000, -500, 0), {**SEED, "Length": 6000})
+        self.assert_consistent()
+
+    def test_wall_without_placement_stays_at_the_origin(self) -> None:
+        with mock.patch.object(OpenSCADEngine, "render", autospec=True, side_effect=_fake_render) as render:
+            entity = self.assert_commits("Height", 3200)
+        params = render.call_args.args[2]
+        self.assertEqual((params["x"], params["y"], params["z"]), (0.0, 0.0, 0.0))
+        self.assertNotIn(PLACEMENT_PSET, entity["psets"])
+        self.assertEqual(entity["geometry"]["bounds"]["min"], [0.0, 0.0, 0.0])
+
+    def test_placement_edit_on_a_wall_without_geometry_is_rejected(self) -> None:
+        before = self.snapshot()
+        with mock.patch.object(OpenSCADEngine, "render") as render:
+            self.assert_rejected(self.edit_placement("X", 1000, guid=WALL_NO_GEOMETRY), 422, "no_existing_geometry")
+        render.assert_not_called()
+        self.assert_unchanged(before)
+
+    def test_invalid_stored_coordinate_blocks_regeneration(self) -> None:
+        # A hand-edited model could store a bad coordinate; any geometry edit
+        # then reports it as a validation failure instead of rendering.
+        self.store.get_entity(WALL).psets[PLACEMENT_PSET] = {"X": "abc"}
+        with mock.patch.object(OpenSCADEngine, "render") as render:
+            detail = self.assert_rejected(self.edit("Length", 6000), 422, "validation_failed")
+        render.assert_not_called()
+        self.assertIn(f"stored {PLACEMENT_PSET}.X", detail["detail"])
+        self.assertEqual(self.store.get_entity(WALL).psets[QTO], SEED)
+
+    def test_placement_is_not_part_of_the_ai_command_contract(self) -> None:
+        self.assertNotIn(PLACEMENT_PSET, contract.EDITABLE_PROPERTIES[IfcType.WALL])
+
+
 class RealOpenSCADEditTest(_TransactionTestCase):
     """Boundary values and recovery through the real OpenSCAD CLI."""
 
@@ -455,6 +582,26 @@ class RealOpenSCADEditTest(_TransactionTestCase):
         entity = self.assert_commits("Height", 3300)
         self.assert_real_stl(entity)
         self.assertEqual(entity["psets"][QTO], {**SEED, "Height": 3300})
+
+    def test_placement_translates_the_real_stl(self) -> None:
+        # Day-52C: the OpenSCAD STL itself is in world coordinates, and a
+        # later dimension edit keeps the wall where it was moved.
+        self.assertEqual(self.edit("X", 2000, pset=PLACEMENT_PSET).status_code, 200)
+        moved = self.edit("Y", -1500, pset=PLACEMENT_PSET)
+        self.assertEqual(moved.status_code, 200, moved.text)
+        resized = self.edit("Length", 4500)
+        self.assertEqual(resized.status_code, 200, resized.text)
+        for response, length in [(moved, SEED["Length"]), (resized, 4500)]:
+            entity = response.json()["entity"]
+            expected_min = (2000.0, -1500.0, 0.0)
+            expected_max = (2000.0 + length, -1500.0 + SEED["Thickness"], float(SEED["Height"]))
+            stl = self.scad_dir / entity["geometry"]["url"].rsplit("/", 1)[1]
+            stl_min, stl_max = _stl_bounds(stl.read_bytes())
+            for axis in range(3):
+                self.assertAlmostEqual(stl_min[axis], expected_min[axis], places=3)
+                self.assertAlmostEqual(stl_max[axis], expected_max[axis], places=3)
+            self.assertEqual(entity["geometry"]["bounds"], {"min": list(expected_min), "max": list(expected_max)})
+        self.assert_consistent()
 
 
 if __name__ == "__main__":

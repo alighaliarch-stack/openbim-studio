@@ -4,7 +4,14 @@ from collections.abc import Callable
 from enum import Enum
 from typing import Any
 from core.persistence import ModelPersistence
-from services.ifc.geometry_inputs import GEOMETRY_INPUTS, dimension_error, drives_geometry
+from services.ifc.geometry_inputs import (
+    GEOMETRY_INPUTS,
+    PLACEMENT_INPUTS,
+    coordinate_error,
+    dimension_error,
+    drives_geometry,
+    geometry_value_error,
+)
 from services.ifc.models import IfcEntity, ModelDocument, SpatialNode
 
 logger = logging.getLogger(__name__)
@@ -119,7 +126,7 @@ class EntityStore:
 
     @staticmethod
     def _validate_geometry_edit(entity: IfcEntity, pset: str, prop: str, value: Any) -> None:
-        problem = dimension_error(value)
+        problem = geometry_value_error(entity.type, pset, prop, value)
         if problem:
             raise PropertyEditRejected(EditRejectionReason.VALIDATION_FAILED, f"{pset}.{prop} {problem}")
         if entity.geometry is None:
@@ -140,6 +147,17 @@ class EntityStore:
                         EditRejectionReason.VALIDATION_FAILED, f"{pset}.{prop} is missing on '{candidate.guid}'"
                     )
                 problem = dimension_error(candidate.psets[pset][prop])
+                if problem:
+                    raise PropertyEditRejected(
+                        EditRejectionReason.VALIDATION_FAILED, f"stored {pset}.{prop} {problem}"
+                    )
+        # Day-52C: placement coordinates are optional (missing = 0), but a
+        # stored value that is present must still be a valid coordinate.
+        for pset, props in PLACEMENT_INPUTS.get(candidate.type, {}).items():
+            for prop in sorted(props):
+                if prop not in candidate.psets.get(pset, {}):
+                    continue
+                problem = coordinate_error(candidate.psets[pset][prop])
                 if problem:
                     raise PropertyEditRejected(
                         EditRejectionReason.VALIDATION_FAILED, f"stored {pset}.{prop} {problem}"

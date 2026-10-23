@@ -66,6 +66,11 @@ class ComponentRegistry:
                     ParamField(name="length", type="number", default=5000, minimum=0),
                     ParamField(name="height", type="number", default=3000, minimum=0),
                     ParamField(name="thickness", type="number", default=200, minimum=0),
+                    # Day-52C: world position of the wall's min corner (mm),
+                    # from OpenBIM_Placement; 0 keeps the origin placement.
+                    ParamField(name="x", type="number", default=0),
+                    ParamField(name="y", type="number", default=0),
+                    ParamField(name="z", type="number", default=0),
                 ],
             )
         )
