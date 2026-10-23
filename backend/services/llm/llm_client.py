@@ -30,6 +30,12 @@ from services.llm.models import AIRequest
 
 logger = logging.getLogger(__name__)
 
+# Day-52: settings read these from the process environment (core/config.py).
+_API_KEY_ENV_VARS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
+_SUPPORTED_PROVIDER_HINT = (
+    "Ollama is the only provider currently supported; start the backend with LLM_PROVIDER=ollama."
+)
+
 SYSTEM_PROMPT = """\
 You are the AI assistant embedded in OpenBIM Studio, a parametric BIM \
 authoring tool. Given the user's natural-language request and the current \
@@ -149,7 +155,9 @@ class LLMClient:
         text response (expected to be a JSON string per SYSTEM_PROMPT).
 
         Raises:
-            LLMClientError: on missing API key or provider failure.
+            LLMClientError: on missing API key, a provider that is not
+            implemented yet (Day-52: everything except "ollama"), or
+            provider failure.
 
         TODO: Implement the actual provider call:
             - anthropic: `anthropic.AsyncAnthropic(api_key=...).messages.create(...)`
@@ -161,9 +169,13 @@ class LLMClient:
             return await self._complete_ollama(request)
 
         if not self._api_key:
+            # Day-52: nothing loads backend/.env, so point at the process
+            # environment instead.
+            key_var = _API_KEY_ENV_VARS.get(self._provider, "an API key variable")
             raise LLMClientError(
                 f"No API key configured for provider '{self._provider}'. "
-                "Set ANTHROPIC_API_KEY or OPENAI_API_KEY in backend/.env."
+                f"Set {key_var} in the environment of the backend process "
+                f"(backend/.env is not loaded automatically). {_SUPPORTED_PROVIDER_HINT}"
             )
 
         context_json = json.dumps(request.model_context.model_dump(mode="json"))
@@ -174,8 +186,12 @@ class LLMClient:
             len(context_json),
         )
 
-        # TODO: replace with a real provider call.
-        raise NotImplementedError("LLMClient.complete: provider integration pending")
+        # TODO: replace with a real provider call. Day-52: until then this is
+        # an LLMClientError (graceful chat reply), not a NotImplementedError
+        # (HTTP 500).
+        raise LLMClientError(
+            f"The '{self._provider}' LLM provider is not implemented yet. {_SUPPORTED_PROVIDER_HINT}"
+        )
 
     async def _complete_ollama(self, request: AIRequest) -> str:
         """

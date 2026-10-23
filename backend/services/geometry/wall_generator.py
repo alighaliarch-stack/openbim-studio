@@ -17,12 +17,15 @@ No fallback geometry is fabricated in either case.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import NamedTuple
 
 from services.ifc.models import GeometryRef, IfcEntity
 from services.openscad.engine import get_current_engine
 from services.openscad.models import ParameterMap, RenderStatus
+
+logger = logging.getLogger(__name__)
 
 _QUANTITIES_PSET = "Qto_WallBaseQuantities"
 _LENGTH_PROP = "Length"
@@ -51,6 +54,13 @@ class WallGenerator:
         result = engine.render(_COMPONENT_ID, params)
 
         if result.status != RenderStatus.SUCCESS or result.bounds is None:
+            # Day-52: the caller only sees "no new geometry"; keep the
+            # engine's own reason (missing binary, OpenSCAD stderr, timeout,
+            # bad STL) in the server log.
+            logger.warning(
+                "Wall render for %s failed (%s): %s",
+                entity.guid, result.status.value, result.error or "no error detail",
+            )
             return entity.geometry
 
         new_bounds = geometry.bounds.model_copy(

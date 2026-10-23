@@ -18,6 +18,7 @@ and mounts the REST API router.
 from __future__ import annotations
 
 import logging
+import shutil
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -67,6 +68,16 @@ async def lifespan(app: FastAPI):
         )
 
     # --- M08 OpenSCAD Engine ---
+    # Day-52: shutil.which checks a path with a directory component
+    # directly and looks a bare command name up on PATH, mirroring how the
+    # CLI is launched; a miss means every wall edit will be rejected.
+    if shutil.which(settings.openscad_binary) is None:
+        logger.warning(
+            "OpenSCAD executable %r was not found (checked as a path and on PATH). "
+            "Wall geometry edits will be rejected until OPENSCAD_BINARY names an "
+            "existing OpenSCAD executable.",
+            settings.openscad_binary,
+        )
     registry = ComponentRegistry()
     renderer = TemplateRenderer(settings.templates_dir)
     executor = CLIExecutor(

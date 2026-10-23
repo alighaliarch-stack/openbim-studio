@@ -47,6 +47,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from api.router import api_router  # noqa: E402
 from core.persistence import ModelPersistence  # noqa: E402
 from services.commands import contract  # noqa: E402
+from services.geometry import wall_generator as wall_generator_module  # noqa: E402
 from services.ifc import entity_store as entity_store_module  # noqa: E402
 from services.ifc.entity_store import EntityStore  # noqa: E402
 from services.ifc.geometry_inputs import GEOMETRY_INPUTS, MAX_DIMENSION_MM  # noqa: E402
@@ -126,6 +127,9 @@ class _TransactionTestCase(unittest.TestCase):
         # can still assert on them.
         patcher = mock.patch.object(entity_store_module.logger, "exception")
         self.logged_exception = patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(wall_generator_module.logger, "warning")
+        self.logged_render_warning = patcher.start()
         self.addCleanup(patcher.stop)
 
     def tearDown(self) -> None:
@@ -304,6 +308,24 @@ class AtomicPropertyEditTest(_TransactionTestCase):
                 self.assert_rejected(response, 502, "geometry_regeneration_failed")
                 self.assert_unchanged(before)
                 self.assertEqual(self.wall_url(), SEED_URL)
+
+    def test_missing_binary_reason_is_logged_and_edit_rejected(self) -> None:
+        # Day-52: the unpatched engine points at a binary that doesn't exist.
+        # The response stays the generic 502, but the engine's own reason
+        # must reach the server log instead of being discarded.
+        before = self.snapshot()
+        response = self.edit("Thickness", 200)
+        detail = self.assert_rejected(response, 502, "geometry_regeneration_failed")
+        self.assertEqual(detail["detail"], "OpenSCAD did not produce new geometry")
+        self.logged_render_warning.assert_called_once()
+        template, *args = self.logged_render_warning.call_args.args
+        message = template % tuple(args)
+        self.assertIn(WALL, message)
+        self.assertIn("openscad-not-installed.exe", message)
+        self.assertIn("not found", message)
+        self.assert_unchanged(before)
+        self.assertEqual(self.wall_url(), SEED_URL)
+        self.assertEqual(list(self.scad_dir.glob("*.stl")), [])
 
     def test_persistence_failure_is_rejected_with_500(self) -> None:
         before = self.snapshot()

@@ -427,5 +427,52 @@ class RouteTest(_ProposalTestCase):
         self.assertEqual(response.json()["commands"], [])
 
 
+class UnimplementedProviderTest(_ProposalTestCase):
+    """Day-52: non-Ollama providers fail as LLMClientError (graceful reply), never as a raw 500."""
+
+    FAKE_KEY = "test-key-not-real"
+
+    async def test_unimplemented_provider_with_key_raises_llm_client_error(self) -> None:
+        for provider in ["anthropic", "openai"]:
+            with self.subTest(provider):
+                with self.assertRaises(LLMClientError) as caught:
+                    await LLMClient(provider, self.FAKE_KEY).complete(_request())
+                message = str(caught.exception)
+                self.assertIn(f"'{provider}' LLM provider is not implemented", message)
+                self.assertIn("LLM_PROVIDER=ollama", message)
+                self.assertNotIn(self.FAKE_KEY, message)
+
+    async def test_missing_key_names_the_process_environment_variable(self) -> None:
+        for provider, variable in [("anthropic", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY")]:
+            with self.subTest(provider):
+                with self.assertRaises(LLMClientError) as caught:
+                    await LLMClient(provider, None).complete(_request())
+                message = str(caught.exception)
+                self.assertIn(f"No API key configured for provider '{provider}'", message)
+                self.assertIn(f"Set {variable} in the environment of the backend process", message)
+                self.assertIn("backend/.env is not loaded automatically", message)
+                self.assertNotIn("in backend/.env.", message)
+                self.assertIn("LLM_PROVIDER=ollama", message)
+
+    async def test_prompt_route_answers_200_with_a_graceful_reply(self) -> None:
+        for label, api_key in [("key set", self.FAKE_KEY), ("no key", None)]:
+            with self.subTest(label):
+                app = FastAPI()
+                app.include_router(api_router)
+                app.state.entity_store = self.store
+                app.state.ai_chat_service = AIChatService(
+                    ContextBuilder(self.store), LLMClient("anthropic", api_key), OutputParser(), self.store)
+                with mock.patch.object(EntityStore, "set_prop") as set_prop:
+                    response = TestClient(app).post(
+                        "/api/ai/prompt", json={"prompt": "Make the selected wall 3.2 m high.", "selected_guid": WALL})
+                self.assertEqual(response.status_code, 200, response.text)
+                body = response.json()
+                self.assertEqual((body["intent"], body["commands"]), ("query", []))
+                self.assertIn("couldn't process that request", body["text"])
+                self.assertIn("LLM_PROVIDER=ollama", body["text"])
+                set_prop.assert_not_called()
+        self.assert_model_unchanged()
+
+
 if __name__ == "__main__":
     unittest.main()
